@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../pbo_tools_rs"
+		}
+	],
+	"settings": {}
+}

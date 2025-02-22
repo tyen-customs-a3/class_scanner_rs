@@ -1,7 +1,151 @@
 use std::str::Chars;
+use std::marker::PhantomData;
 use log::{debug, trace};
-use crate::error::Result;
+use crate::models::{Error, Result};
 use super::tokens::{Token, TokenType};
+
+// Token stream states
+pub struct Unparsed;
+pub struct Parsed;
+pub struct Validated;
+
+pub struct TokenStream<S = Unparsed> {
+    tokens: Vec<Token>,
+    position: usize,
+    _state: PhantomData<S>,
+}
+
+impl TokenStream<Unparsed> {
+    pub fn new() -> Self {
+        Self {
+            tokens: Vec::new(),
+            position: 0,
+            _state: PhantomData,
+        }
+    }
+
+    pub fn parse(mut self, input: &str) -> Result<TokenStream<Parsed>> {
+        let tokenizer = Tokenizer::new(input);
+        self.tokens = tokenizer.collect::<Result<Vec<_>>>()?;
+        Ok(TokenStream {
+            tokens: self.tokens,
+            position: 0,
+            _state: PhantomData,
+        })
+    }
+}
+
+impl TokenStream<Parsed> {
+    pub fn validate(self) -> Result<TokenStream<Validated>> {
+        // Validate token sequence
+        let mut depth = 0;
+        let mut in_array = false;
+
+        for token in &self.tokens {
+            match token.token_type {
+                TokenType::BlockStart => depth += 1,
+                TokenType::BlockEnd => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return Err(Error::Parse {
+                            message: format!("Unmatched block at position {}", token.position),
+                            line: None,
+                            column: None
+                        });
+                    }
+                }
+                TokenType::ArrayStart => {
+                    if in_array {
+                        return Err(Error::Parse {
+                            message: "Nested arrays not supported".to_string(),
+                            line: None,
+                            column: None
+                        });
+                    }
+                    in_array = true;
+                }
+                TokenType::ArrayEnd => {
+                    if !in_array {
+                        return Err(Error::Parse {
+                            message: format!("Unmatched array end at position {}", token.position),
+                            line: None,
+                            column: None
+                        });
+                    }
+                    in_array = false;
+                }
+                _ => {}
+            }
+        }
+
+        if depth != 0 {
+            return Err(Error::Parse {
+                message: format!("Unclosed block at position {}", self.tokens.last().map_or(0, |t| t.position)),
+                line: None,
+                column: None
+            });
+        }
+
+        if in_array {
+            return Err(Error::Parse {
+                message: format!("Unclosed array at position {}", self.tokens.last().map_or(0, |t| t.position)),
+                line: None,
+                column: None
+            });
+        }
+
+        Ok(TokenStream {
+            tokens: self.tokens,
+            position: 0,
+            _state: PhantomData,
+        })
+    }
+}
+
+impl<S> TokenStream<S> {
+    pub fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
+    }
+
+    pub fn next(&mut self) -> Option<&Token> {
+        if self.position < self.tokens.len() {
+            let token = &self.tokens[self.position];
+            self.position += 1;
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    pub fn expect_next(&mut self, expected: TokenType) -> Result<&Token> {
+        match self.next() {
+            Some(token) if token.token_type == expected => Ok(token),
+            Some(token) => Err(Error::Parse {
+                message: format!("Expected {:?} but found {:?} at position {}", 
+                    expected, token.token_type, token.position),
+                line: None,
+                column: None
+            }),
+            None => Err(Error::Parse {
+                message: "Unexpected end of tokens".to_string(),
+                line: None,
+                column: None
+            }),
+        }
+    }
+
+    pub fn consume_until(&mut self, token_type: TokenType) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        while self.position < self.tokens.len() {
+            if self.tokens[self.position].token_type == token_type {
+                break;
+            }
+            tokens.push(self.tokens[self.position].clone());
+            self.position += 1;
+        }
+        tokens
+    }
+}
 
 pub struct Tokenizer<'a> {
     input: Chars<'a>,
@@ -84,20 +228,34 @@ impl<'a> Tokenizer<'a> {
         let start_pos = self.position;
         let mut value = String::new();
         let mut is_escaped = false;
+        self.advance(); // Skip opening quote
 
         while let Some(ch) = self.peek_char {
-            if !is_escaped && ch == quote {
-                self.advance();
-                debug!("Read string from position {} to {}: {:?}", start_pos, self.position, value);
-                break;
-            }
-            
-            if ch == '\\' && !is_escaped {
-                is_escaped = true;
+            if !is_escaped {
+                if ch == quote {
+                    self.advance(); // Skip closing quote
+                    debug!("Read string from position {} to {}: {:?}", start_pos, self.position, value);
+                    break;
+                }
+                if ch == '\\' {
+                    is_escaped = true;
+                    self.advance();
+                    continue;
+                }
             } else {
+                match ch {
+                    'n' => value.push('\n'),
+                    't' => value.push('\t'),
+                    'r' => value.push('\r'),
+                    '\\' => value.push('\\'),
+                    '"' => value.push('"'),
+                    '\'' => value.push('\''),
+                    _ => value.push(ch),
+                }
                 is_escaped = false;
+                self.advance();
+                continue;
             }
-            
             value.push(ch);
             self.advance();
         }
@@ -132,7 +290,7 @@ impl<'a> Tokenizer<'a> {
         let mut value = String::new();
         
         while let Some(ch) = self.peek_char {
-            if !ch.is_alphanumeric() && ch != '_' {
+            if !ch.is_alphanumeric() && ch != '_' && ch != '\\' && ch != '/' && ch != '.' {
                 break;
             }
             value.push(ch);
@@ -182,7 +340,6 @@ impl<'a> Iterator for Tokenizer<'a> {
             }
             '"' | '\'' => {
                 let quote = current_char;
-                self.advance();
                 Token::new(TokenType::String, self.read_string(quote), current_pos)
             }
             '0'..='9' | '-' => {
@@ -190,12 +347,10 @@ impl<'a> Iterator for Tokenizer<'a> {
             }
             _ if current_char.is_alphabetic() || current_char == '_' => {
                 let value = self.read_identifier();
-                let token_type = if value == "class" {
-                    debug!("Found Class keyword at position {}", current_pos);
-                    TokenType::Class
-                } else {
-                    debug!("Found Identifier token at position {}: {}", current_pos, value);
-                    TokenType::Identifier
+                let token_type = match value.to_lowercase().as_str() {
+                    "class" => TokenType::Class,
+                    "true" | "false" => TokenType::Boolean,
+                    _ => TokenType::Identifier,
                 };
                 Token::new(token_type, value, current_pos)
             }

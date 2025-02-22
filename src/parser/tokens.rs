@@ -10,6 +10,8 @@ pub enum TokenType {
     Semicolon,
     String,
     Number,
+    Boolean,
+    Comma
 }
 
 #[derive(Debug, Clone)]

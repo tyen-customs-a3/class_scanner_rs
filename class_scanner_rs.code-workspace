@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../pbo_tools_rs"
+		},
+		{
+			"path": "../class_scanner"
 		}
 	],
 	"settings": {}

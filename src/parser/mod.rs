@@ -1,16 +1,16 @@
-mod tokenizer;
-mod property_parser;
-mod class_parser;
-mod block_handler;
-mod config;
-mod value_parser;
-mod tokens;
+//! Parser module for handling class definitions and configurations
+//! 
+//! This module provides the core parsing functionality for class definitions,
+//! including support for inheritance, nested classes, and property parsing.
 
-pub use tokenizer::Tokenizer;
-pub use property_parser::PropertyParser;
-pub use class_parser::ClassParser;
-pub use block_handler::BlockHandler;
-pub use config::ParserConfig;
-pub use tokens::{Token, TokenType, PropertyToken, PropertyTokenType};
-pub use value_parser::ValueParser;
-pub(crate) use tokenizer::tokenize;
+pub mod block;
+pub mod class;
+pub mod config;
+pub mod patterns;
+pub mod property;
+pub mod tokenizer;
+pub mod tokens;
+
+pub use config::*;
+pub use property::*;
+pub use class::parser::ClassParser;

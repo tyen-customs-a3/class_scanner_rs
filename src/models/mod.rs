@@ -1,7 +1,9 @@
-mod class;
-mod property;
-mod scan;
+pub mod class;
+pub mod error;
+pub mod scan;
+mod properties;
 
 pub use class::*;
-pub use property::*;
+pub use error::*;
 pub use scan::*;
+pub use properties::*;

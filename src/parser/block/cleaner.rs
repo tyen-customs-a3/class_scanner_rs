@@ -1,5 +1,5 @@
 use log::trace;
-use crate::parser::patterns::{LINE_COMMENT, BLOCK_COMMENT, EXTRA_NEWLINES, NESTED_CLASS};
+use crate::parser::patterns::{LINE_COMMENT, BLOCK_COMMENT, EXTRA_NEWLINES};
 
 pub trait BlockCleaner {
     fn clean_code(&self, code: &str) -> String;
@@ -18,9 +18,8 @@ impl BlockCleaner for super::handler::BlockHandler {
 
     fn clean_inner_block(&self, block: &str) -> String {
         trace!("Cleaning inner block of length {}", block.len());
-        let cleaned = NESTED_CLASS.replace_all(block, "").into_owned();
-        trace!("Cleaned inner block length: {}", cleaned.len());
-        cleaned
+        // Only clean comments and normalize whitespace, preserve nested classes
+        self.clean_code(block)
     }
 }
 
@@ -54,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clean_nested_class_definitions() {
+    fn test_preserve_nested_class_definitions() {
         let cleaner = create_cleaner();
         let block = r#"{
             class ItemInfo: UniformItem {
@@ -64,7 +63,7 @@ mod tests {
             displayName = "Mirrorform";
         }"#;
         let cleaned = cleaner.clean_inner_block(block);
-        assert!(!cleaned.contains("class ItemInfo"));
+        assert!(cleaned.contains("class ItemInfo"));
         assert!(cleaned.contains("displayName"));
     }
 

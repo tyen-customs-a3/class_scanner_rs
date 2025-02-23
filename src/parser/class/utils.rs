@@ -1,13 +1,18 @@
-use log::{trace, debug};
+use log::{trace, debug, info};
 use std::path::Path;
 
 pub fn extract_addon_name(path: &Path) -> Option<String> {
-    trace!("Extracting addon name from path: {:?}", path);
+    info!("Extracting addon name from path: {:?}", path);
+    trace!("Path components: {:?}", path.components().collect::<Vec<_>>());
+    
     let addon = path.components()
         .find(|c| {
             if let std::path::Component::Normal(name) = c {
-                name.to_string_lossy().starts_with('@')
+                let name_str = name.to_string_lossy();
+                trace!("Checking component '{}' for addon prefix", name_str);
+                name_str.starts_with('@')
             } else {
+                trace!("Skipping non-normal component: {:?}", c);
                 false
             }
         })
@@ -16,7 +21,7 @@ pub fn extract_addon_name(path: &Path) -> Option<String> {
     if let Some(ref name) = addon {
         debug!("Found addon name: {}", name);
     } else {
-        debug!("No addon name found in path");
+        debug!("No addon name found in path components");
     }
     
     addon

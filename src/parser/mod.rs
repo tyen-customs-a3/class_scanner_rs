@@ -14,3 +14,6 @@ pub mod tokens;
 pub use config::*;
 pub use property::*;
 pub use class::parser::ClassParser;
+
+#[cfg(test)]
+pub mod tests;

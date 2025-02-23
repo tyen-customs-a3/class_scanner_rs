@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use crate::models::error::{Error, PropertyTypeMismatchError, Result};
 use crate::parser::patterns;
-use log::trace;
+use log::{trace, debug};
+use std::path::{PathBuf, Component};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PropertyValue {
@@ -16,95 +17,254 @@ pub enum PropertyValue {
 impl PropertyValue {
     pub fn parse(value: &str, case_sensitive: bool) -> Result<Self> {
         let value = value.trim();
+        debug!("Parsing property value: {:?}", value);
         
-        // Try matching in order of most specific to least specific
+        // Handle empty arrays
         if patterns::EMPTY_ARRAY_PATTERN.is_match(value) {
-            trace!("Detected empty array value");
+            debug!("Matched empty array pattern");
             return Ok(Self::Array(Vec::new()));
         }
         
-        if let Some(cap) = patterns::STRING_PATTERN.captures(value) {
-            trace!("Detected string value: {}", &cap[1]);
-            return Ok(Self::String(cap[1].to_string()));
+        // Handle quoted strings
+        if value.starts_with('"') && value.ends_with('"') {
+            debug!("Processing quoted string");
+            let inner = &value[1..value.len()-1];
+            let result = Self::parse_string(inner);
+            debug!("Parsed quoted string result: {:?}", result);
+            return Ok(Self::String(result));
         }
         
-        if let Some(cap) = patterns::ARRAY_PATTERN.captures(value) {
-            trace!("Detected array value: {}", value);
-            return Ok(Self::Array(Self::split_array_items(&cap[1])));
+        // Handle arrays
+        if value.starts_with('{') && value.ends_with('}') {
+            debug!("Processing array value");
+            let inner = &value[1..value.len()-1].trim();
+            if inner.is_empty() {
+                debug!("Found empty array");
+                return Ok(Self::Array(Vec::new()));
+            }
+            
+            let result = Self::parse_array(inner);
+            debug!("Parsed array result: {:?}", result);
+            return Ok(Self::Array(result));
         }
         
+        // Handle boolean values
         if patterns::BOOLEAN_PATTERN.is_match(value) {
-            trace!("Detected boolean value: {}", value);
-            return Ok(Self::Boolean(value.to_lowercase() == "true"));
+            let bool_val = value.to_lowercase() == "true";
+            debug!("Parsed boolean value: {}", bool_val);
+            return Ok(Self::Boolean(bool_val));
         }
         
+        // Handle numeric values
         if patterns::NUMBER_PATTERN.is_match(value) {
-            trace!("Detected number value: {}", value);
-            return if value.contains('.') {
-                Ok(Self::Number(value.parse().unwrap()))
+            if value.contains('.') {
+                let num: f64 = value.parse().unwrap();
+                debug!("Parsed float value: {}", num);
+                return Ok(Self::Number(num));
             } else {
-                Ok(Self::Integer(value.parse().unwrap()))
-            };
-        }
-        
-        // Identifier is the fallback for any valid alphanumeric+special chars
-        if value.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '/' || c == '\\' || c == '.') {
-            trace!("Detected identifier value: {}", value);
-            return Ok(Self::Identifier(if case_sensitive {
-                value.to_string()
-            } else {
-                value.to_lowercase()
-            }));
-        }
-
-        Err(Error::Validation(format!("Invalid property value: {}", value)))
-    }
-
-    fn split_array_items(content: &str) -> Vec<String> {
-        let mut items = Vec::new();
-        let mut current = String::new();
-        let mut depth = 0;
-        let mut in_string = false;
-        let mut escape = false;
-
-        for c in content.chars() {
-            match c {
-                '\\' if in_string => {
-                    escape = true;
-                    current.push(c);
-                }
-                '"' if !escape => {
-                    in_string = !in_string;
-                    current.push(c);
-                }
-                '{' if !in_string => {
-                    depth += 1;
-                    current.push(c);
-                }
-                '}' if !in_string => {
-                    depth -= 1;
-                    current.push(c);
-                }
-                ',' if !in_string && depth == 0 => {
-                    if !current.is_empty() {
-                        trace!("Split array item: {}", current.trim());
-                        items.push(current.trim().to_string());
-                        current.clear();
-                    }
-                }
-                _ => {
-                    escape = false;
-                    current.push(c);
-                }
+                let num: i64 = value.parse().unwrap();
+                debug!("Parsed integer value: {}", num);
+                return Ok(Self::Integer(num));
             }
         }
 
-        if !current.is_empty() {
-            trace!("Split final array item: {}", current.trim());
-            items.push(current.trim().to_string());
+        // Handle paths (both raw and forward-slash paths)
+        if value.starts_with('\\') || (!value.contains('"') && value.contains('/')) {
+            let normalized = Self::normalize_path(value);
+            debug!("Normalized path: {:?}", normalized);
+            return Ok(Self::String(normalized));
         }
 
-        items
+        // Treat as identifier
+        let ident = if case_sensitive {
+            value.to_string()
+        } else {
+            value.to_lowercase()
+        };
+        debug!("Created identifier: {:?}", ident);
+        Ok(Self::Identifier(ident))
+    }
+
+    // Core string parsing state machine
+    fn parse_string(input: &str) -> String {
+        debug!("Starting string parse for input: {:?}", input);
+        #[derive(Debug, PartialEq)]
+        enum State {
+            Normal,
+            Escaped,
+        }
+
+        // If the input starts with a backslash, treat it as a raw path
+        if input.starts_with('\\') {
+            return input.to_string();
+        }
+
+        let mut result = String::with_capacity(input.len());
+        let mut state = State::Normal;
+        
+        for (i, c) in input.chars().enumerate() {
+            trace!("Processing char at pos {}: {:?}, state: {:?}", i, c, state);
+            match state {
+                State::Normal => {
+                    match c {
+                        '\\' => {
+                            trace!("Entering escaped state");
+                            state = State::Escaped;
+                        },
+                        '/' => {
+                            trace!("Converting forward slash to backslash");
+                            result.push('\\');
+                        },
+                        _ => {
+                            trace!("Adding normal char: {:?}", c);
+                            result.push(c);
+                        }
+                    }
+                },
+                State::Escaped => {
+                    match c {
+                        'n' => result.push('\n'),
+                        'r' => result.push('\r'),
+                        't' => result.push('\t'),
+                        '"' => result.push('"'),
+                        '\\' => result.push('\\'),
+                        _ => {
+                            result.push('\\');
+                            result.push(c);
+                        }
+                    }
+                    state = State::Normal;
+                }
+            }
+        }
+        
+        if state == State::Escaped {
+            result.push('\\');
+        }
+        
+        debug!("Final parsed string result: {:?}", result);
+        result
+    }
+
+    fn normalize_path(value: &str) -> String {
+        // Special case: if it's not a path but contains special chars, return as is
+        if value.starts_with('_') || value.starts_with('-') || value.starts_with('.') {
+            return value.to_string();
+        }
+
+        // For raw paths starting with backslash, normalize but preserve leading backslash
+        if value.starts_with('\\') {
+            let cleaned = value.replace("\\\\", "\\");
+            if cleaned != "\\" {
+                return cleaned;
+            }
+        }
+
+        // Split by either slash type and recombine with single backslashes
+        let parts: Vec<&str> = value.split(|c| c == '/' || c == '\\')
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        if parts.is_empty() {
+            return value.to_string();
+        }
+
+        // Reconstruct with proper separators
+        if value.starts_with('\\') {
+            format!("\\{}", parts.join("\\"))
+        } else {
+            parts.join("\\")
+        }
+    }
+
+    fn parse_array(content: &str) -> Vec<String> {
+        debug!("Starting array parse for content: {:?}", content);
+        #[derive(Debug, PartialEq)]
+        enum State {
+            Normal,
+            InQuotes,
+            Escaped,
+        }
+
+        let mut items = Vec::new();
+        let mut current = String::new();
+        let mut state = State::Normal;
+        let mut depth = 0;
+        
+        let mut chars = content.chars().peekable();
+        while let Some(c) = chars.next() {
+            trace!("Processing array char: {:?}, state: {:?}, depth: {}", c, state, depth);
+            match state {
+                State::Normal => {
+                    match c {
+                        '"' => {
+                            trace!("Entering quoted state");
+                            state = State::InQuotes;
+                            current.push(c);
+                        },
+                        '{' => {
+                            depth += 1;
+                            trace!("Increasing depth to: {}", depth);
+                            current.push(c);
+                        },
+                        '}' => {
+                            depth -= 1;
+                            trace!("Decreasing depth to: {}", depth);
+                            current.push(c);
+                        },
+                        ',' if depth == 0 => {
+                            if !current.is_empty() {
+                                trace!("Adding array item: {:?}", current);
+                                items.push(current.trim().to_string());
+                                current.clear();
+                            }
+                        },
+                        _ => current.push(c),
+                    }
+                },
+                State::InQuotes => {
+                    match c {
+                        '"' => {
+                            trace!("Exiting quoted state");
+                            state = State::Normal;
+                            current.push(c);
+                        },
+                        '\\' => {
+                            trace!("Entering escaped state in quotes");
+                            state = State::Escaped;
+                            current.push(c);
+                        },
+                        _ => current.push(c),
+                    }
+                },
+                State::Escaped => {
+                    trace!("Processing escaped char in quotes: {:?}", c);
+                    current.push(c);
+                    state = State::InQuotes;
+                }
+            }
+        }
+        
+        if !current.is_empty() {
+            trace!("Adding final array item: {:?}", current);
+            items.push(current.trim().to_string());
+        }
+        
+        let processed: Vec<String> = items.into_iter()
+            .map(|item| {
+                let item = item.trim();
+                if item.starts_with('"') && item.ends_with('"') {
+                    debug!("Processing quoted array item: {:?}", item);
+                    Self::parse_string(&item[1..item.len()-1])
+                } else {
+                    debug!("Using raw array item: {:?}", item);
+                    item.to_string()
+                }
+            })
+            .collect();
+        
+        debug!("Final array parse result: {:?}", processed);
+        processed
     }
 
     pub fn type_name(&self) -> &'static str {
@@ -228,6 +388,78 @@ impl PropertyValue {
             _ => None
         }
     }
+
+    // Helper function to determine if a string needs escaping
+    pub(crate) fn needs_escaping(s: &str) -> bool {
+        s.contains('\\') || s.contains('"') || s.contains('\n') || 
+        s.contains('\r') || s.contains('\t')
+    }
+
+    // Helper to escape a string properly
+    pub(crate) fn escape_string(s: &str) -> String {
+        if !Self::needs_escaping(s) {
+            return s.to_string();
+        }
+
+        let mut result = String::with_capacity(s.len() * 2);
+        for c in s.chars() {
+            match c {
+                '\\' => result.push_str("\\\\"),
+                '"' => result.push_str("\\\""),
+                '\n' => result.push_str("\\n"),
+                '\r' => result.push_str("\\r"),
+                '\t' => result.push_str("\\t"),
+                _ => result.push(c),
+            }
+        }
+        result
+    }
+
+    // Helper to format a value as a string with proper escaping
+    pub fn to_string_escaped(&self) -> String {
+        match self {
+            Self::String(s) | Self::Identifier(s) => {
+                if Self::needs_escaping(s) {
+                    format!("\"{}\"", Self::escape_string(s))
+                } else {
+                    s.clone()
+                }
+            },
+            Self::Number(n) => n.to_string(),
+            Self::Integer(i) => i.to_string(),
+            Self::Boolean(b) => b.to_string(),
+            Self::Array(arr) => {
+                if arr.is_empty() {
+                    "{}".to_string()
+                } else {
+                    let items: Vec<String> = arr.iter()
+                        .map(|s| {
+                            if Self::needs_escaping(s) {
+                                // First escape quotes normally
+                                let escaped = s.replace("\"", "\\\"");
+                                // Then escape the whole string for array context
+                                format!("\\\"{}\\\"", escaped)
+                            } else {
+                                s.clone()
+                            }
+                        })
+                        .collect();
+                    format!("{{{}}}", items.join(", "))
+                }
+            }
+        }
+    }
+
+    // Helper to convert path separators based on target OS
+    #[cfg(windows)]
+    fn normalize_path_separators(path: &str) -> String {
+        path.replace('/', "\\")
+    }
+
+    #[cfg(not(windows))]
+    fn normalize_path_separators(path: &str) -> String {
+        path.replace('\\', "/")
+    }
 }
 
 // Implement TryFrom for common types
@@ -274,171 +506,5 @@ impl TryFrom<&PropertyValue> for Vec<String> {
     
     fn try_from(value: &PropertyValue) -> Result<Self> {
         value.require_array().map(|arr| arr.to_vec())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_string_values() {
-        let tests = vec![
-            (r#""simple string""#, "simple string"),
-            (r#""quoted \"string\"""#, r#"quoted "string""#),
-            (r#""path\to\file.paa""#, r#"path\to\file.paa"#),
-            (r#""multi\nline""#, r#"multi\nline"#),
-        ];
-
-        for (input, expected) in tests {
-            if let PropertyValue::String(value) = PropertyValue::parse(input, true).unwrap() {
-                assert_eq!(value, expected);
-            } else {
-                panic!("Expected String variant for input: {}", input);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_numeric_values() {
-        assert!(matches!(PropertyValue::parse("123", true).unwrap(), PropertyValue::Integer(123)));
-        assert!(matches!(PropertyValue::parse("-456", true).unwrap(), PropertyValue::Integer(-456)));
-        assert!(matches!(PropertyValue::parse("1.234", true).unwrap(), PropertyValue::Number(1.234)));
-        assert!(matches!(PropertyValue::parse("-5.678", true).unwrap(), PropertyValue::Number(-5.678)));
-    }
-
-    #[test]
-    fn test_parse_boolean_values() {
-        assert!(matches!(PropertyValue::parse("true", true).unwrap(), PropertyValue::Boolean(true)));
-        assert!(matches!(PropertyValue::parse("false", true).unwrap(), PropertyValue::Boolean(false)));
-        assert!(matches!(PropertyValue::parse("TRUE", true).unwrap(), PropertyValue::Boolean(true)));
-        assert!(matches!(PropertyValue::parse("FALSE", true).unwrap(), PropertyValue::Boolean(false)));
-    }
-
-    #[test]
-    fn test_parse_array_values() {
-        let tests = vec![
-            ("{}", 0),
-            (r#"{"single"}"#, 1),
-            (r#"{"one", "two"}"#, 2),
-            (r#"{"a", "b", "c"}"#, 3),
-            (r#"{{"nested", "array"}, {"second", "part"}}"#, 2),
-        ];
-
-        for (input, expected_len) in tests {
-            if let PropertyValue::Array(values) = PropertyValue::parse(input, true).unwrap() {
-                assert_eq!(values.len(), expected_len);
-            } else {
-                panic!("Expected Array variant for input: {}", input);
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_identifiers() {
-        let tests = vec![
-            "simple_ident",
-            "WITH_CAPS",
-            "mixed_Case_123",
-            r"path\to\file",
-            "class.subclass",
-        ];
-
-        for input in tests {
-            if let PropertyValue::Identifier(value) = PropertyValue::parse(input, true).unwrap() {
-                assert_eq!(value, input);
-            } else {
-                panic!("Expected Identifier variant for input: {}", input);
-            }
-        }
-
-        // Test case sensitivity
-        if let PropertyValue::Identifier(value) = PropertyValue::parse("UPPERCASE", false).unwrap() {
-            assert_eq!(value, "uppercase");
-        }
-    }
-
-    #[test]
-    fn test_type_conversions() {
-        let string_val = PropertyValue::String("test".to_string());
-        let num_val = PropertyValue::Number(1.23);
-        let int_val = PropertyValue::Integer(456);
-        let bool_val = PropertyValue::Boolean(true);
-        let array_val = PropertyValue::Array(vec!["one".to_string(), "two".to_string()]);
-
-        // Test successful conversions
-        assert_eq!(String::try_from(&string_val).unwrap(), "test");
-        assert_eq!(f64::try_from(&num_val).unwrap(), 1.23);
-        assert_eq!(i64::try_from(&int_val).unwrap(), 456);
-        assert_eq!(bool::try_from(&bool_val).unwrap(), true);
-        assert_eq!(Vec::<String>::try_from(&array_val).unwrap(), vec!["one", "two"]);
-
-        // Test failed conversions
-        assert!(String::try_from(&bool_val).is_err());
-        assert!(f64::try_from(&string_val).is_err());
-        assert!(i64::try_from(&array_val).is_err());
-        assert!(bool::try_from(&num_val).is_err());
-    }
-
-    #[test]
-    fn test_value_accessors() {
-        let string_val = PropertyValue::String("test".to_string());
-        let num_val = PropertyValue::Number(1.23);
-        let int_val = PropertyValue::Integer(456);
-        let bool_val = PropertyValue::Boolean(true);
-        let array_val = PropertyValue::Array(vec!["one".to_string(), "two".to_string()]);
-
-        // Test optional accessors
-        assert_eq!(string_val.as_string().unwrap(), "test");
-        assert_eq!(num_val.as_number().unwrap(), 1.23);
-        assert_eq!(int_val.as_integer().unwrap(), 456);
-        assert_eq!(bool_val.as_boolean().unwrap(), true);
-        assert_eq!(array_val.as_array().unwrap(), &["one", "two"]);
-
-        // Test required accessors
-        assert_eq!(string_val.require_string().unwrap(), "test");
-        assert_eq!(num_val.require_number().unwrap(), 1.23);
-        assert_eq!(int_val.require_integer().unwrap(), 456);
-        assert_eq!(bool_val.require_boolean().unwrap(), true);
-        assert_eq!(array_val.require_array().unwrap(), &["one", "two"]);
-
-        // Test type mismatches
-        assert!(string_val.as_number().is_none());
-        assert!(num_val.as_boolean().is_none());
-        assert!(bool_val.as_array().is_none());
-        assert!(array_val.as_string().is_none());
-
-        assert!(string_val.require_number().is_err());
-        assert!(num_val.require_boolean().is_err());
-        assert!(bool_val.require_array().is_err());
-        assert!(array_val.require_string().is_err());
-    }
-
-    #[test]
-    fn test_array_handling() {
-        let empty = PropertyValue::array(vec![]);
-        let single = PropertyValue::array(vec!["one".to_string()]);
-        let multiple = PropertyValue::array(vec!["one".to_string(), "two".to_string()]);
-
-        assert!(empty.is_array());
-        assert!(single.is_array());
-        assert!(multiple.is_array());
-
-        assert_eq!(empty.array_values().unwrap().len(), 0);
-        assert_eq!(single.array_values().unwrap().len(), 1);
-        assert_eq!(multiple.array_values().unwrap().len(), 2);
-
-        assert_eq!(single.array_values().unwrap()[0], "one");
-        assert_eq!(multiple.array_values().unwrap()[1], "two");
-    }
-
-    #[test]
-    fn test_single_value_parsing() {
-        // Test automatic type inference in single()
-        assert!(matches!(PropertyValue::single("123".to_string()), PropertyValue::Integer(123)));
-        assert!(matches!(PropertyValue::single("1.23".to_string()), PropertyValue::Number(1.23)));
-        assert!(matches!(PropertyValue::single("true".to_string()), PropertyValue::Boolean(true)));
-        assert!(matches!(PropertyValue::single("simple_id".to_string()), PropertyValue::Identifier(_)));
-        assert!(matches!(PropertyValue::single("\"quoted\"".to_string()), PropertyValue::String(_)));
     }
 }

@@ -64,6 +64,10 @@ impl BlockHandler {
                     trace!("Increased block depth to {}", depth);
                 }
                 '}' if !in_string => {
+                    if depth == 0 {
+                        warn!("Unmatched closing brace found");
+                        return None;
+                    }
                     depth -= 1;
                     trace!("Decreased block depth to {}", depth);
                     if depth == 0 && block_start.is_some() {

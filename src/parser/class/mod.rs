@@ -3,9 +3,6 @@ mod class_extractor;
 mod hierarchy;
 mod utils;
 
-#[cfg(test)]
-mod test_utils;
-
 use crate::models::{ClassData, Result};
 use std::path::PathBuf;
 
@@ -23,3 +20,6 @@ pub struct ClassParsingContext {
 }
 
 pub use parser::ClassParser;
+
+#[cfg(test)]
+pub mod tests;

@@ -17,10 +17,10 @@ pub fn parse_hierarchical_classes<'a>(
 ) -> Result<Vec<ClassData>> {
     info!("Starting hierarchical class parsing of content length {}", content.len());
     if let Some(file) = current_file {
-        debug!("Parsing from file: {:?}", file);
+        trace!("Parsing from file: {:?}", file);
     }
     if let Some(addon) = current_addon {
-        debug!("Using addon context: {}", addon);
+        trace!("Using addon context: {}", addon);
     }
 
     let mut classes = Vec::new();
@@ -42,7 +42,7 @@ pub fn parse_hierarchical_classes<'a>(
     while pos < content.len() {
         let mut found = false;
         if let Some((class_data, consumed)) = extractor.parse_class(&content[pos..], &context)? {
-            debug!("Successfully parsed class '{}' at position {}", class_data.name, pos);
+            trace!("Successfully parsed class '{}' at position {}", class_data.name, pos);
             trace!("Class '{}' has {} properties and {} nested classes", 
                 class_data.name, 
                 class_data.properties.len(),
@@ -60,7 +60,7 @@ pub fn parse_hierarchical_classes<'a>(
                 trace!("Skipping {} characters to next potential class", skip);
                 pos += skip;
             } else {
-                debug!("No more class patterns found, ending parse");
+                trace!("No more class patterns found, ending parse");
                 break;
             }
         }

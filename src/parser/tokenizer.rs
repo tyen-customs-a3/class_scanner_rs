@@ -157,7 +157,7 @@ impl<'a> Tokenizer<'a> {
     pub fn new(input: &'a str) -> Self {
         let mut chars = input.chars();
         let peek_char = chars.next();
-        debug!("Created new tokenizer with {} characters", input.len());
+        trace!("Created new tokenizer with {} characters", input.len());
         Self {
             input: chars,
             position: 0,
@@ -190,7 +190,7 @@ impl<'a> Tokenizer<'a> {
                 let mut input_clone = self.input.clone();
                 match input_clone.next() {
                     Some('/') => {
-                        debug!("Found line comment at position {}", self.position);
+                        trace!("Found line comment at position {}", self.position);
                         self.advance(); // Skip first '/'
                         self.advance(); // Skip second '/'
                         while let Some(ch) = self.peek_char {
@@ -202,14 +202,14 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
                     Some('*') => {
-                        debug!("Found block comment at position {}", self.position);
+                        trace!("Found block comment at position {}", self.position);
                         self.advance(); // Skip '/'
                         self.advance(); // Skip '*'
                         let mut last_char = None;
                         while let Some(ch) = self.peek_char {
                             if last_char == Some('*') && ch == '/' {
                                 self.advance();
-                                debug!("End of block comment at position {}", self.position);
+                                trace!("End of block comment at position {}", self.position);
                                 break;
                             }
                             last_char = Some(ch);
@@ -234,7 +234,7 @@ impl<'a> Tokenizer<'a> {
             if !is_escaped {
                 if ch == quote {
                     self.advance(); // Skip closing quote
-                    debug!("Read string from position {} to {}: {:?}", start_pos, self.position, value);
+                    trace!("Read string from position {} to {}: {:?}", start_pos, self.position, value);
                     break;
                 }
                 if ch == '\\' {
@@ -281,7 +281,7 @@ impl<'a> Tokenizer<'a> {
             self.advance();
         }
         
-        debug!("Read number from position {} to {}: {}", start_pos, self.position, value);
+        trace!("Read number from position {} to {}: {}", start_pos, self.position, value);
         value
     }
 
@@ -297,7 +297,7 @@ impl<'a> Tokenizer<'a> {
             self.advance();
         }
         
-        debug!("Read identifier from position {} to {}: {}", start_pos, self.position, value);
+        trace!("Read identifier from position {} to {}: {}", start_pos, self.position, value);
         value
     }
 }
@@ -315,7 +315,7 @@ impl<'a> Iterator for Tokenizer<'a> {
         let token = match current_char {
             '{' => {
                 self.advance();
-                debug!("Found BlockStart token at position {}", current_pos);
+                trace!("Found BlockStart token at position {}", current_pos);
                 Token::new(TokenType::BlockStart, "{".to_string(), current_pos)
             }
             '}' => {
@@ -356,7 +356,7 @@ impl<'a> Iterator for Tokenizer<'a> {
             }
             _ => {
                 self.advance();
-                debug!("Skipping unknown character '{}' at position {}", current_char, current_pos);
+                trace!("Skipping unknown character '{}' at position {}", current_char, current_pos);
                 return self.next();
             }
         };
@@ -366,8 +366,8 @@ impl<'a> Iterator for Tokenizer<'a> {
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>> {
-    debug!("Starting tokenization of input with length {}", input.len());
+    trace!("Starting tokenization of input with length {}", input.len());
     let tokens = Tokenizer::new(input).collect();
-    debug!("Finished tokenization");
+    trace!("Finished tokenization");
     tokens
 }

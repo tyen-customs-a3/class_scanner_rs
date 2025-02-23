@@ -157,7 +157,7 @@ fn test_case_sensitivity_handling() {
             Property = 3;
         };
         
-        class DERIVED: baseClass {
+        class DERIVED: BaseClass {
             NEW_PROP = "test";
         };
         
@@ -168,15 +168,22 @@ fn test_case_sensitivity_handling() {
     
     let classes = parser.parse_hierarchical(content).unwrap();
     
-    // All class names should be lowercase
-    assert_eq!(classes[0].name, "baseclass");
+    // When case_sensitive=false, all class names should be lowercase
+    assert!(classes.iter().any(|c| c.name == "baseclass"));
     
-    let derived = classes.iter().find(|c| c.name == "derived").unwrap();
-    assert_eq!(derived.parent.to_lowercase(), "derived");
+    let derived = classes.iter()
+        .find(|c| c.name == "derived")
+        .unwrap();
+    assert_eq!(derived.parent, "baseclass");  // Fixed: parent should be "baseclass" 
     
     // Properties should preserve their original case but be found case-insensitively
-    let base = &classes[0];
+    let base = classes.iter()
+        .find(|c| c.name == "baseclass")
+        .unwrap();
     assert_eq!(base.properties.len(), 3);
+
+    // Verify that case-insensitive property access works
+    assert!(base.properties.iter().any(|(k, _)| k.eq_ignore_ascii_case("property")));
 }
 
 #[test]

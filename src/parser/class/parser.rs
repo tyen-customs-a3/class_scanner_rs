@@ -42,9 +42,9 @@ impl ClassParser {
         self.current_file = Some(file_path);
         self.current_addon = super::utils::extract_addon_name(self.current_file.as_ref().unwrap());
         if let Some(ref addon) = self.current_addon {
-            debug!("Extracted addon name: {}", addon);
+            trace!("Extracted addon name: {}", addon);
         } else {
-            debug!("No addon name found in current file path");
+            trace!("No addon name found in current file path");
         }
     }
 
@@ -73,7 +73,7 @@ impl ClassParser {
         while pos < cleaned_content.len() {
             match extractor.parse_class(&cleaned_content[pos..], &context)? {
                 Some((class_data, consumed)) => {
-                    debug!("Parsed class '{}' at position {}", class_data.name, pos);
+                    trace!("Parsed class '{}' at position {}", class_data.name, pos);
                     trace!("Class '{}' details: {} properties, {} nested classes", 
                         class_data.name, 
                         class_data.properties.len(),
@@ -82,7 +82,7 @@ impl ClassParser {
                     
                     let parent = &class_data.parent;
                     if !parent.is_empty() {
-                        debug!("Class '{}' extends '{}'", class_data.name, parent);
+                        trace!("Class '{}' extends '{}'", class_data.name, parent);
                     }
                     
                     classes.insert(class_data.name.clone(), class_data);

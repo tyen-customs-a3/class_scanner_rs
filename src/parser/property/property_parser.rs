@@ -19,7 +19,7 @@ impl Default for PropertyParser {
 
 impl PropertyParser {
     pub fn new() -> Self {
-        debug!("Creating new PropertyParser with default configuration");
+        trace!("Creating new PropertyParser with default configuration");
         Self {
             config: ParserConfig::default(),
             validators: HashMap::new(),
@@ -27,7 +27,7 @@ impl PropertyParser {
     }
 
     pub fn with_config(config: ParserConfig) -> Self {
-        debug!("Creating new PropertyParser with custom configuration: {:?}", config);
+        trace!("Creating new PropertyParser with custom configuration: {:?}", config);
         Self {
             config,
             validators: HashMap::new(),
@@ -39,7 +39,7 @@ impl PropertyParser {
     }
 
     pub fn parse_block_properties(&self, block: &str) -> Result<HashMap<String, PropertyValue>> {
-        debug!("Starting to parse block properties, block length: {}", block.len());
+        trace!("Starting to parse block properties, block length: {}", block.len());
         let mut properties = HashMap::new();
         let cleaned_block = self.preprocess_block(block)?;
 
@@ -52,7 +52,7 @@ impl PropertyParser {
                 name.push_str("[]");
             }
             
-            debug!("Processing property: {} = {}", name, value_str);
+            trace!("Processing property: {} = {}", name, value_str);
             let key = PropertyKey::new(name.clone());
             let value = PropertyValue::parse(&value_str, self.config.case_sensitive)?;
 

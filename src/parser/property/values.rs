@@ -17,41 +17,41 @@ pub enum PropertyValue {
 impl PropertyValue {
     pub fn parse(value: &str, case_sensitive: bool) -> Result<Self> {
         let value = value.trim();
-        debug!("Parsing property value: {:?}", value);
+        trace!("Parsing property value: {:?}", value);
         
         // Handle empty arrays
         if patterns::EMPTY_ARRAY_PATTERN.is_match(value) {
-            debug!("Matched empty array pattern");
+            trace!("Matched empty array pattern");
             return Ok(Self::Array(Vec::new()));
         }
         
         // Handle quoted strings
         if value.starts_with('"') && value.ends_with('"') {
-            debug!("Processing quoted string");
+            trace!("Processing quoted string");
             let inner = &value[1..value.len()-1];
             let result = Self::parse_string(inner);
-            debug!("Parsed quoted string result: {:?}", result);
+            trace!("Parsed quoted string result: {:?}", result);
             return Ok(Self::String(result));
         }
         
         // Handle arrays
         if value.starts_with('{') && value.ends_with('}') {
-            debug!("Processing array value");
+            trace!("Processing array value");
             let inner = &value[1..value.len()-1].trim();
             if inner.is_empty() {
-                debug!("Found empty array");
+                trace!("Found empty array");
                 return Ok(Self::Array(Vec::new()));
             }
             
             let result = Self::parse_array(inner);
-            debug!("Parsed array result: {:?}", result);
+            trace!("Parsed array result: {:?}", result);
             return Ok(Self::Array(result));
         }
         
         // Handle boolean values
         if patterns::BOOLEAN_PATTERN.is_match(value) {
             let bool_val = value.to_lowercase() == "true";
-            debug!("Parsed boolean value: {}", bool_val);
+            trace!("Parsed boolean value: {}", bool_val);
             return Ok(Self::Boolean(bool_val));
         }
         
@@ -59,11 +59,11 @@ impl PropertyValue {
         if patterns::NUMBER_PATTERN.is_match(value) {
             if value.contains('.') {
                 let num: f64 = value.parse().unwrap();
-                debug!("Parsed float value: {}", num);
+                trace!("Parsed float value: {}", num);
                 return Ok(Self::Number(num));
             } else {
                 let num: i64 = value.parse().unwrap();
-                debug!("Parsed integer value: {}", num);
+                trace!("Parsed integer value: {}", num);
                 return Ok(Self::Integer(num));
             }
         }
@@ -71,7 +71,7 @@ impl PropertyValue {
         // Handle paths (both raw and forward-slash paths)
         if value.starts_with('\\') || (!value.contains('"') && value.contains('/')) {
             let normalized = Self::normalize_path(value);
-            debug!("Normalized path: {:?}", normalized);
+            trace!("Normalized path: {:?}", normalized);
             return Ok(Self::String(normalized));
         }
 
@@ -81,13 +81,13 @@ impl PropertyValue {
         } else {
             value.to_lowercase()
         };
-        debug!("Created identifier: {:?}", ident);
+        trace!("Created identifier: {:?}", ident);
         Ok(Self::Identifier(ident))
     }
 
     // Core string parsing state machine
     fn parse_string(input: &str) -> String {
-        debug!("Starting string parse for input: {:?}", input);
+        trace!("Starting string parse for input: {:?}", input);
         #[derive(Debug, PartialEq)]
         enum State {
             Normal,
@@ -142,7 +142,7 @@ impl PropertyValue {
             result.push('\\');
         }
         
-        debug!("Final parsed string result: {:?}", result);
+        trace!("Final parsed string result: {:?}", result);
         result
     }
 
@@ -178,7 +178,7 @@ impl PropertyValue {
     }
 
     fn parse_array(content: &str) -> Vec<String> {
-        debug!("Starting array parse for content: {:?}", content);
+        trace!("Starting array parse for content: {:?}", content);
         #[derive(Debug, PartialEq)]
         enum State {
             Normal,
@@ -254,16 +254,16 @@ impl PropertyValue {
             .map(|item| {
                 let item = item.trim();
                 if item.starts_with('"') && item.ends_with('"') {
-                    debug!("Processing quoted array item: {:?}", item);
+                    trace!("Processing quoted array item: {:?}", item);
                     Self::parse_string(&item[1..item.len()-1])
                 } else {
-                    debug!("Using raw array item: {:?}", item);
+                    trace!("Using raw array item: {:?}", item);
                     item.to_string()
                 }
             })
             .collect();
         
-        debug!("Final array parse result: {:?}", processed);
+        trace!("Final array parse result: {:?}", processed);
         processed
     }
 

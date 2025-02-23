@@ -19,9 +19,9 @@ pub fn extract_addon_name(path: &Path) -> Option<String> {
         .map(|c| c.as_os_str().to_string_lossy().into_owned());
     
     if let Some(ref name) = addon {
-        debug!("Found addon name: {}", name);
+        trace!("Found addon name: {}", name);
     } else {
-        debug!("No addon name found in path components");
+        trace!("No addon name found in path components");
     }
     
     addon

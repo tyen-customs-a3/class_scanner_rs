@@ -1,0 +1,296 @@
+class Mission
+{
+	class Entities
+	{
+		class Item1
+		{
+			dataType="Group";
+			side="West";
+			class Entities
+			{
+				items=6;
+				class Item0
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2152.137,146.91107,9523.0146};
+						angles[]={6.221262,4.4505897,6.2671871};
+					};
+					side="West";
+					flags=6;
+					class Attributes
+					{
+						skill=1;
+						rank="CORPORAL";
+						name="B_A_SL";
+						description="Squad Leader@Alpha Squad";
+						isPlayable=1;
+					};
+					id=1312;
+					type="B_Soldier_SL_F";
+					class CustomAttributes
+					{
+						class Attribute0
+						{
+							property="TMF_SpecialistMarker";
+							expression="_this setVariable ['TMF_SpecialistMarker',_value,true];";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="["""",""""]";
+								};
+							};
+						};
+						class Attribute1
+						{
+							property="TMF_assignGear_faction";
+							expression="false";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="blufor_loadout";
+								};
+							};
+						};
+						class Attribute2
+						{
+							property="TMF_assignGear_enabled";
+							expression="false";
+							class Value
+							{
+								class data
+								{
+									singleType="BOOL";
+									value=1;
+								};
+							};
+						};
+						class Attribute3
+						{
+							property="TMF_Channellist";
+							expression="_this setVariable ['TMF_Channellist',_value,true];";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="[4]";
+								};
+							};
+						};
+						class Attribute4
+						{
+							property="pitch";
+							expression="_this setpitch _value;";
+							class Value
+							{
+								class data
+								{
+									singleType="SCALAR";
+									value=1.03;
+								};
+							};
+						};
+						class Attribute5
+						{
+							property="speaker";
+							expression="_this setspeaker _value;";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="Male08ENG";
+								};
+							};
+						};
+						class Attribute6
+						{
+							property="TMF_assignGear_full";
+							expression="[_this,  _value] call TMF_assignGear_fnc_helper";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="[""sl"",""blufor_loadout"",true]";
+								};
+							};
+						};
+						class Attribute7
+						{
+							property="TMF_assignGear_role";
+							expression="false";
+							class Value
+							{
+								class data
+								{
+									singleType="STRING";
+									value="sl";
+								};
+							};
+						};
+						nAttributes=8;
+					};
+				};
+			};
+		};
+		class Item2
+		{
+			dataType="Group";
+			side="West";
+			class Entities
+			{
+				items=6;
+				class Item0
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2158,146.83345,9524.0498};
+						angles[]={6.2212658,4.4501009,6.2511969};
+					};
+					side="West";
+					flags=6;
+					class Attributes
+					{
+						skill=1;
+						rank="CORPORAL";
+						name="B_C_SL";
+						description="Squad Leader@Charlie Squad";
+						isPlayable=1;
+					};
+					id=1326;
+					type="B_Soldier_SL_F";
+				};
+				class Item1
+				{
+					dataType="Object";
+					class PositionInfo
+					{
+						position[]={2157.4819,146.96794,9525.9814};
+						angles[]={0,4.4505897,0};
+					};
+					side="West";
+					flags=5;
+					class Attributes
+					{
+						skill=1;
+						name="B_C_AR";
+						description="Automatic Rifleman";
+						isPlayable=1;
+						class Inventory
+						{
+							class primaryWeapon
+							{
+								name="rhs_weap_mg42";
+								firemode="rhs_weap_mg42:manual";
+								class primaryMuzzleMag
+								{
+									name="rhsgref_50Rnd_792x57_SmE_drum";
+									ammoLeft=50;
+								};
+							};
+							class handgun
+							{
+								name="rhsusf_weap_glock17g4";
+								class primaryMuzzleMag
+								{
+									name="rhsusf_mag_17Rnd_9x19_JHP";
+									ammoLeft=17;
+								};
+							};
+							class uniform
+							{
+								typeName="TC_U_aegis_guerilla_garb_m81_sudan";
+								isBackpack=0;
+								class ItemCargo
+								{
+									items=7;
+									class Item0
+									{
+										name="ACRE_BF888S";
+										count=1;
+									};
+									class Item1
+									{
+										name="ACE_fieldDressing";
+										count=10;
+									};
+									class Item2
+									{
+										name="ACE_packingBandage";
+										count=10;
+									};
+									class Item3
+									{
+										name="ACE_tourniquet";
+										count=4;
+									};
+									class Item4
+									{
+										name="ACE_epinephrine";
+										count=2;
+									};
+									class Item5
+									{
+										name="ACE_morphine";
+										count=2;
+									};
+									class Item6
+									{
+										name="ACE_splint";
+										count=2;
+									};
+								};
+							};
+							class vest
+							{
+								typeName="rhsusf_spcs_ocp_saw";
+								isBackpack=0;
+								class MagazineCargo
+								{
+									items=3;
+									class Item0
+									{
+										name="SmokeShell";
+										count=2;
+										ammoLeft=1;
+									};
+									class Item1
+									{
+										name="rhs_mag_m67";
+										count=2;
+										ammoLeft=1;
+									};
+									class Item2
+									{
+										name="rhsusf_mag_17Rnd_9x19_JHP";
+										count=1;
+										ammoLeft=17;
+									};
+								};
+							};
+							class backpack
+							{
+								typeName="pca_eagle_a3_od";
+								isBackpack=1;
+							};
+							map="ItemMap";
+							compass="ItemCompass";
+							watch="ItemWatch";
+							headgear="simc_pasgt_m81";
+						};
+					};
+					id=1327;
+					type="B_soldier_AR_F";
+				};
+			};
+		};
+	};
+};

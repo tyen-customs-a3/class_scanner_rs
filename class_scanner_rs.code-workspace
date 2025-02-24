@@ -4,10 +4,7 @@
 			"path": "."
 		},
 		{
-			"path": "../pbo_tools_rs"
-		},
-		{
-			"path": "../class_scanner"
+			"path": "../pbo_tools"
 		}
 	],
 	"settings": {}

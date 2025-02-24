@@ -1,4 +1,4 @@
-use class_scanner_rs::{
+use class_scanner::{
     models::ClassData,
     parser::{ClassParser, ParserConfig},
 };

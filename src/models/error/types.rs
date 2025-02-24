@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::error::Error as StdError;
 use std::fmt;
 use std::io;
-use pbo_tools_rs::error::PboError;
+use pbo_tools::error::PboError;
 
 #[derive(Debug)]
 pub enum Error {

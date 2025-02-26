@@ -1,7 +1,3 @@
-mod class;
-mod property;
-mod scan;
+pub mod property_value;
 
-pub use class::*;
-pub use property::*;
-pub use scan::*;
+pub use property_value::PropertyValue;

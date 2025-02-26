@@ -1,0 +1,480 @@
+use super::tokens::Token;
+use crate::error::{Error, SourceLocation};
+use std::iter::Peekable;
+use std::str::Chars;
+use std::path::PathBuf;
+
+pub struct Tokenizer<'a> {
+    input: Peekable<Chars<'a>>,
+    line: usize,
+    column: usize,
+    file_path: Option<PathBuf>,
+    preserve_comments: bool,
+}
+
+impl<'a> Tokenizer<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self {
+            input: input.chars().peekable(),
+            line: 1,
+            column: 0,
+            file_path: None,
+            preserve_comments: false,
+        }
+    }
+
+    pub fn with_file_path(input: &'a str, file_path: impl Into<PathBuf>) -> Self {
+        Self {
+            input: input.chars().peekable(),
+            line: 1,
+            column: 0,
+            file_path: Some(file_path.into()),
+            preserve_comments: false,
+        }
+    }
+
+    pub fn with_comments(mut self, preserve: bool) -> Self {
+        self.preserve_comments = preserve;
+        self
+    }
+
+    pub fn tokenize(&mut self) -> Result<Vec<Token>, Error> {
+        let mut tokens = Vec::new();
+        
+        while let Some(token) = self.next_token()? {
+            tokens.push(token);
+        }
+        
+        Ok(tokens)
+    }
+
+    fn next_token(&mut self) -> Result<Option<Token>, Error> {
+        self.skip_whitespace();
+
+        match self.peek() {
+            None => Ok(None),
+            Some(c) => {
+                let token = match c {
+                    '{' => self.single_char_token(Token::LeftBrace),
+                    '}' => self.single_char_token(Token::RightBrace),
+                    '[' => {
+                        self.advance();
+                        if self.match_char(']') {
+                            Token::ArrayMarker
+                        } else {
+                            Token::LeftBracket
+                        }
+                    },
+                    ']' => self.single_char_token(Token::RightBracket),
+                    ';' => self.single_char_token(Token::Semicolon),
+                    ':' => self.single_char_token(Token::Colon),
+                    ',' => self.single_char_token(Token::Comma),
+                    '=' => self.handle_equals()?,
+                    '+' => self.handle_plus()?,
+                    '-' => {
+                        if matches!(self.peek_next(), Some('0'..='9')) {
+                            self.read_number()?
+                        } else {
+                            self.handle_minus()?
+                        }
+                    },
+                    '"' => self.read_string()?,
+                    '/' => {
+                        if self.peek_next() == Some('/') {
+                            self.read_line_comment()?
+                        } else if self.peek_next() == Some('*') {
+                            self.read_block_comment()?
+                        } else {
+                            return Err(self.error("Unexpected '/' character"));
+                        }
+                    },
+                    '#' => self.read_preprocessor_directive()?,
+                    c if c.is_ascii_digit() => self.read_number()?,
+                    c if c.is_ascii_alphabetic() || c == '_' || c == '\\' => self.read_identifier(),
+                    _ => return Err(self.error(&format!("Unexpected character: {}", c))),
+                };
+                Ok(Some(token))
+            }
+        }
+    }
+
+    fn read_string(&mut self) -> Result<Token, Error> {
+        self.advance(); // Skip opening quote
+        let mut string = String::new();
+        
+        while let Some(c) = self.peek() {
+            match c {
+                '"' => {
+                    self.advance(); // Skip closing quote
+                    return Ok(Token::StringLiteral(string));
+                }
+                '\\' => {
+                    self.advance();
+                    match self.next() {
+                        Some('n') => string.push('\n'),
+                        Some('r') => string.push('\r'),
+                        Some('t') => string.push('\t'),
+                        Some('\\') => string.push('\\'),
+                        Some('"') => string.push('"'),
+                        Some(c) => string.push(c),
+                        None => return Err(self.error("Unterminated string literal")),
+                    }
+                }
+                _ => {
+                    string.push(c);
+                    self.advance();
+                }
+            }
+        }
+        
+        Err(self.error("Unterminated string literal"))
+    }
+
+    fn read_number(&mut self) -> Result<Token, Error> {
+        let mut number = String::new();
+        let mut has_dot = false;
+
+        // Handle negative numbers
+        if self.peek() == Some('-') {
+            number.push('-');
+            self.advance();
+            
+            // There must be a digit after the minus sign
+            if !matches!(self.peek(), Some('0'..='9')) {
+                return Err(self.error("Expected digit after '-'"));
+            }
+        }
+
+        while let Some(c) = self.peek() {
+            match c {
+                '0'..='9' => {
+                    number.push(c);
+                    self.advance();
+                }
+                '.' if !has_dot => {
+                    has_dot = true;
+                    number.push(c);
+                    self.advance();
+
+                    // There must be a digit after the decimal point
+                    if !matches!(self.peek(), Some('0'..='9')) {
+                        return Err(self.error("Expected digit after decimal point"));
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        match number.parse::<f64>() {
+            Ok(n) => Ok(Token::NumberLiteral(n)),
+            Err(_) => Err(self.error(&format!("Invalid number: {}", number))),
+        }
+    }
+
+    fn read_identifier(&mut self) -> Token {
+        let mut ident = String::new();
+        
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '\\' || c == '.' {
+                ident.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        match ident.as_str() {
+            "class" => Token::Class,
+            "public" => Token::Public,
+            "private" => Token::Private,
+            "include" => Token::Include,
+            "define" => Token::Define,
+            "true" => Token::BooleanLiteral(true),
+            "false" => Token::BooleanLiteral(false),
+            _ => Token::Identifier(ident),
+        }
+    }
+
+    fn read_line_comment(&mut self) -> Result<Token, Error> {
+        self.advance(); // Skip first '/'
+        self.advance(); // Skip second '/'
+        
+        let mut comment = String::new();
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            comment.push(c);
+            self.advance();
+        }
+
+        if self.preserve_comments {
+            Ok(Token::Comment(comment))
+        } else {
+            self.next_token()?
+                .ok_or_else(|| self.error("Unexpected end of input after comment"))
+        }
+    }
+
+    fn read_block_comment(&mut self) -> Result<Token, Error> {
+        self.advance(); // Skip '/'
+        self.advance(); // Skip '*'
+        
+        let mut comment = String::new();
+        let mut depth = 1;
+
+        while depth > 0 {
+            match (self.peek(), self.peek_next()) {
+                (Some('*'), Some('/')) => {
+                    depth -= 1;
+                    self.advance();
+                    self.advance();
+                }
+                (Some('/'), Some('*')) => {
+                    depth += 1;
+                    comment.push('/');
+                    comment.push('*');
+                    self.advance();
+                    self.advance();
+                }
+                (Some('\n'), _) => {
+                    comment.push('\n');
+                    self.advance();
+                    self.line += 1;
+                    self.column = 0;
+                }
+                (Some(c), _) => {
+                    comment.push(c);
+                    self.advance();
+                }
+                (None, _) => return Err(self.error("Unterminated block comment")),
+            }
+        }
+
+        if self.preserve_comments {
+            Ok(Token::Comment(comment))
+        } else {
+            self.next_token()?
+                .ok_or_else(|| self.error("Unexpected end of input after comment"))
+        }
+    }
+
+    fn read_preprocessor_directive(&mut self) -> Result<Token, Error> {
+        self.advance(); // Skip '#'
+        let directive = self.read_identifier();
+        
+        match directive {
+            Token::Include => Ok(Token::Include),
+            Token::Define => Ok(Token::Define),
+            _ => Err(self.error("Unknown preprocessor directive")),
+        }
+    }
+
+    fn handle_equals(&mut self) -> Result<Token, Error> {
+        self.advance();
+        Ok(Token::Equals)
+    }
+
+    fn handle_plus(&mut self) -> Result<Token, Error> {
+        self.advance();
+        if self.match_char('=') {
+            Ok(Token::PlusEquals)
+        } else {
+            Err(self.error("Expected '=' after '+'"))
+        }
+    }
+
+    fn handle_minus(&mut self) -> Result<Token, Error> {
+        self.advance();
+        
+        // Check if next character is a digit (negative number)
+        if matches!(self.peek(), Some('0'..='9')) {
+            // Backtrack to let read_number handle it
+            self.column -= 1;
+            self.read_number()
+        } else if self.match_char('=') {
+            Ok(Token::MinusEquals)
+        } else {
+            Err(self.error("Expected '=' after '-' or digit for negative number"))
+        }
+    }
+
+    fn peek(&mut self) -> Option<char> {
+        self.input.peek().copied()
+    }
+
+    fn peek_next(&mut self) -> Option<char> {
+        let mut iter = self.input.clone();
+        iter.next();
+        iter.next()
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let c = self.input.next();
+        if let Some(c) = c {
+            if c == '\n' {
+                self.line += 1;
+                self.column = 0;
+            } else {
+                self.column += 1;
+            }
+        }
+        c
+    }
+
+    fn advance(&mut self) {
+        self.next();
+    }
+
+    fn match_char(&mut self, expected: char) -> bool {
+        if self.peek() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn single_char_token(&mut self, token: Token) -> Token {
+        self.advance();
+        token
+    }
+
+    fn error(&self, message: &str) -> Error {
+        Error::LexerError {
+            message: message.to_string(),
+            location: SourceLocation::new(
+                self.file_path.clone(),
+                self.line,
+                self.column
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_tokens() {
+        let input = "class MyClass { public }";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert_eq!(tokens, vec![
+            Token::Class,
+            Token::Identifier("MyClass".to_string()),
+            Token::LeftBrace,
+            Token::Public,
+            Token::RightBrace,
+        ]);
+    }
+
+    #[test]
+    fn test_string_literals() {
+        let input = r#"class Test { "hello world" "escaped\"quote" }"#;
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert!(tokens.contains(&Token::StringLiteral("hello world".to_string())));
+        assert!(tokens.contains(&Token::StringLiteral("escaped\"quote".to_string())));
+    }
+
+    #[test]
+    fn test_number_literals() {
+        let input = "123 -456 789.0";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert!(tokens.contains(&Token::NumberLiteral(123.0)));
+        assert!(tokens.contains(&Token::NumberLiteral(-456.0)));
+        assert!(tokens.contains(&Token::NumberLiteral(789.0)));
+    }
+
+    #[test]
+    fn test_comments() {
+        let input = "// Line comment\n/* Block comment */\nclass";
+        let mut tokenizer = Tokenizer::new(input).with_comments(true);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert!(tokens.contains(&Token::Comment(" Line comment".to_string())));
+        assert!(tokens.contains(&Token::Comment(" Block comment ".to_string())));
+        assert!(tokens.contains(&Token::Class));
+    }
+
+    #[test]
+    fn test_operators() {
+        let input = "= += -=";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert_eq!(tokens, vec![
+            Token::Equals,
+            Token::PlusEquals,
+            Token::MinusEquals,
+        ]);
+    }
+
+    #[test]
+    fn test_array_marker() {
+        let input = "[] [";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert_eq!(tokens, vec![
+            Token::ArrayMarker,
+            Token::LeftBracket,
+        ]);
+    }
+
+    #[test]
+    fn test_preprocessor_directives() {
+        let input = "#include #define";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert_eq!(tokens, vec![
+            Token::Include,
+            Token::Define,
+        ]);
+    }
+
+    #[test]
+    fn test_error_cases() {
+        // Unterminated string
+        let input = "\"unterminated";
+        let mut tokenizer = Tokenizer::new(input);
+        assert!(tokenizer.tokenize().is_err());
+
+        // Invalid number
+        let input = "12.34.56";
+        let mut tokenizer = Tokenizer::new(input);
+        assert!(tokenizer.tokenize().is_err());
+
+        // Unterminated block comment
+        let input = "/* unterminated";
+        let mut tokenizer = Tokenizer::new(input);
+        assert!(tokenizer.tokenize().is_err());
+    }
+
+    #[test]
+    fn test_texture_paths() {
+        let input = r#"hiddenSelectionsTextures[] = {\rhsusf\addons\rhsusf_infantry2\gear\head\data\rhs_helmet_mich_des_co.paa};"#;
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        // The path should be a single identifier token
+        assert!(tokens.contains(&Token::Identifier(r#"\rhsusf\addons\rhsusf_infantry2\gear\head\data\rhs_helmet_mich_des_co.paa"#.to_string())));
+    }
+}

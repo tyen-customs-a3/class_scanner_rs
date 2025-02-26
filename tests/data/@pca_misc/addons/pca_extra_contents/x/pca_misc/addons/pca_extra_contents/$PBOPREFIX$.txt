@@ -1,6 +1,0 @@
-//<'pca_extra_contents.pbo' properties via Mikero's dos tools, dll version 9.93>
-prefix=x\pca_misc\addons\pca_extra_contents;
-Mikero=DePbo.dll.7.96;
-version=23010823;
-//PboType=Arma Addon;
-//</properties>

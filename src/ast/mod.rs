@@ -122,6 +122,10 @@ impl PropertyNode {
         self.array_values = values;
         self
     }
+
+    pub fn as_str(&self) -> Option<&str> {
+        Some(&self.raw_value)
+    }
 }
 
 #[cfg(test)]

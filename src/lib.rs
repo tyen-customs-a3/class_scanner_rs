@@ -320,4 +320,37 @@ mod tests {
         assert_eq!(processed.properties["overridden"].raw_value, "derived_value");
         assert_eq!(processed.properties["new_prop"].raw_value, "derived");
     }
+    
+    #[test]
+    fn test_class_scanner() {
+        let scanner = ClassScanner::new();
+        
+        let input = r#"
+            class Base {
+                prop1 = "base";
+                array[] = {"item1", "item2"};
+            };
+            
+            class Derived : Base {
+                prop1 = "derived";
+                prop2 = "new";
+                array[] += {"item3"};
+            };
+        "#;
+        
+        let classes = scanner.parse_string(input).unwrap();
+        assert_eq!(classes.len(), 3); // Root node + Base + Derived
+        assert_eq!(classes[0].nested_classes.len(), 2); // Base and Derived
+        
+        let mut processed = scanner.process_inheritance(classes, "Derived").unwrap();
+        scanner.process_arrays(&mut processed).unwrap();
+        
+        // Check properties
+        assert_eq!(processed.properties["prop1"].raw_value, "derived"); // Overridden
+        assert_eq!(processed.properties["prop2"].raw_value, "new"); // Added
+        
+        // Get array values after processing
+        let array = processed.get_array("array").unwrap();
+        assert_eq!(array, &["item1", "item2", "item3"]); // Base array + appended item
+    }
 }

@@ -19,9 +19,26 @@ impl ArrayProcessor {
     }
 
     fn append_operation(base: &[String], to_append: &[String]) -> Vec<String> {
-        let mut result = base.to_vec();
-        result.extend_from_slice(to_append);
-        result.dedup();
+        // Create a result vector with deduplicated base elements
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+        
+        // First add base elements without duplicates
+        for item in base {
+            if !seen.contains(item) {
+                seen.insert(item);
+                result.push(item.clone());
+            }
+        }
+        
+        // Then add items from to_append that don't exist in the result yet
+        for item in to_append {
+            if !seen.contains(item) {
+                seen.insert(item);
+                result.push(item.clone());
+            }
+        }
+        
         result
     }
 

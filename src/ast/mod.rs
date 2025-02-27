@@ -90,6 +90,16 @@ impl ClassNode {
 
         Ok(())
     }
+
+    pub fn get_array(&self, name: &str) -> Option<&Vec<String>> {
+        self.properties.get(name).and_then(|prop| {
+            if prop.value_type == PropertyType::Array {
+                Some(&prop.array_values)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl PropertyNode {

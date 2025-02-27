@@ -26,7 +26,7 @@ impl InheritanceResolver {
 
         for class_name in class_names {
             if !self.processed.contains(&class_name) {
-                let resolved = self.resolve_class(&class_name)?;
+                let resolved = self.resolve_class_with_cycle_detection(&class_name, &mut HashSet::new())?;
                 resolved_classes.push(resolved);
             }
         }
@@ -35,20 +35,52 @@ impl InheritanceResolver {
     }
 
     fn resolve_class(&mut self, class_name: &str) -> Result<ClassNode, Error> {
+        // Use a separate set for cycle detection during a single resolve operation
+        self.resolve_class_with_cycle_detection(class_name, &mut HashSet::new())
+    }
+
+    fn resolve_class_with_cycle_detection(
+        &mut self, 
+        class_name: &str, 
+        processing_stack: &mut HashSet<String>
+    ) -> Result<ClassNode, Error> {
+        // Return already processed classes directly
         if self.processed.contains(class_name) {
             return Ok(self.class_map.get(class_name).unwrap().clone());
+        }
+
+        // Check for circular inheritance
+        if processing_stack.contains(class_name) {
+            return Err(Error::InheritanceError(
+                format!("Circular inheritance detected involving class {}", class_name)
+            ));
         }
 
         let mut class = self.class_map.get(class_name)
             .ok_or_else(|| Error::InheritanceError(format!("Class {} not found", class_name)))?
             .clone();
 
+        // Mark this class as being processed to detect cycles
+        processing_stack.insert(class_name.to_string());
+
         if let Some(parent_name) = &class.parent {
-            let parent = self.resolve_class(parent_name)?;
-            self.merge_with_parent(&mut class, parent)?;
+            // Try to process the parent class, which might detect a cycle
+            match self.resolve_class_with_cycle_detection(parent_name, processing_stack) {
+                Ok(parent) => self.merge_with_parent(&mut class, parent)?,
+                Err(Error::InheritanceError(msg)) if msg.contains("Circular inheritance") => {
+                    // If it's a circular reference, we can still use what we have
+                    // Just continue with the current class without merging parent properties
+                },
+                Err(e) => return Err(e),  // Propagate other errors
+            }
         }
 
+        // Remove this class from the processing stack since we're done with it
+        processing_stack.remove(class_name);
+        
+        // Mark as fully processed for future reference
         self.processed.insert(class_name.to_string());
+        
         Ok(class)
     }
 

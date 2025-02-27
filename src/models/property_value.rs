@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use crate::ast::{PropertyNode, PropertyType};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -12,29 +13,29 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
-    pub fn new(name: &str, value: &str, value_type: crate::ast::PropertyType) -> Self {
+    pub fn new(name: &str, value: &str, value_type: PropertyType) -> Self {
         match value_type {
-            crate::ast::PropertyType::String => {
+            PropertyType::String => {
                 PropertyValue::String(value.to_string())
             },
-            crate::ast::PropertyType::Number => {
+            PropertyType::Number => {
                 if let Ok(n) = value.parse() {
                     PropertyValue::Number(n)
                 } else {
                     PropertyValue::String(value.to_string())
                 }
             },
-            crate::ast::PropertyType::Boolean => {
+            PropertyType::Boolean => {
                 if let Ok(b) = value.parse() {
                     PropertyValue::Bool(b)
                 } else {
                     PropertyValue::String(value.to_string())
                 }
             },
-            crate::ast::PropertyType::Array => {
+            PropertyType::Array => {
                 PropertyValue::Array(Vec::new())
             },
-            crate::ast::PropertyType::Object => {
+            PropertyType::Object => {
                 PropertyValue::Object(HashMap::new())
             },
         }
@@ -76,6 +77,30 @@ impl PropertyValue {
         match self {
             PropertyValue::Object(o) => Some(o),
             _ => None,
+        }
+    }
+}
+
+impl From<PropertyNode> for PropertyValue {
+    fn from(node: PropertyNode) -> Self {
+        match node.value_type {
+            PropertyType::String => PropertyValue::String(node.raw_value),
+            PropertyType::Number => {
+                if let Ok(n) = node.raw_value.parse() {
+                    PropertyValue::Number(n)
+                } else {
+                    PropertyValue::String(node.raw_value)
+                }
+            },
+            PropertyType::Boolean => {
+                if let Ok(b) = node.raw_value.parse() {
+                    PropertyValue::Bool(b)
+                } else {
+                    PropertyValue::String(node.raw_value)
+                }
+            },
+            PropertyType::Array => PropertyValue::Array(node.array_values),
+            PropertyType::Object => PropertyValue::Object(HashMap::new()),
         }
     }
 }

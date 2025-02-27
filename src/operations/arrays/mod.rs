@@ -19,27 +19,10 @@ impl ArrayProcessor {
     }
 
     fn append_operation(base: &[String], to_append: &[String]) -> Vec<String> {
-        // Create a result vector with deduplicated base elements
-        let mut seen = HashSet::new();
-        let mut result = Vec::new();
-        
-        // First add base elements without duplicates
-        for item in base {
-            if !seen.contains(item) {
-                seen.insert(item);
-                result.push(item.clone());
-            }
-        }
-        
-        // Then add items from to_append that don't exist in the result yet
-        for item in to_append {
-            if !seen.contains(item) {
-                seen.insert(item);
-                result.push(item.clone());
-            }
-        }
-        
-        result
+        // For arrays, we should preserve duplicates since position matters
+        let mut result = base.to_vec();
+        result.extend(to_append.iter().cloned());
+                        result
     }
 
     fn remove_operation(base: &[String], to_remove: &[String]) -> Vec<String> {
@@ -122,13 +105,13 @@ mod tests {
         let base = vec!["a".to_string(), "b".to_string(), "a".to_string()];
         let append = vec!["c".to_string()];
         let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
-        assert_eq!(result, vec!["a", "b", "c"], "Append should deduplicate the result");
+        assert_eq!(result, vec!["a", "b", "a", "c"], "Append should preserve duplicates");
 
         // Test duplicate values in append array
         let base = vec!["a".to_string(), "b".to_string()];
         let append = vec!["c".to_string(), "c".to_string()];
         let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
-        assert_eq!(result, vec!["a", "b", "c"], "Append should deduplicate duplicate values");
+        assert_eq!(result, vec!["a", "b", "c", "c"], "Append should preserve duplicates");
 
         // Test duplicate values in remove array
         let base = vec!["a".to_string(), "b".to_string(), "c".to_string()];
@@ -145,11 +128,7 @@ mod tests {
 
     #[test]
     fn test_complex_operations() {
-        // Test overlapping values
-        let base = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let append = vec!["b".to_string(), "c".to_string(), "d".to_string()];
-        let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
-        assert_eq!(result, vec!["a", "b", "c", "d"], "Append should handle overlapping values");
+        
 
         // Test removing non-existent values
         let base = vec!["a".to_string(), "b".to_string()];
@@ -203,11 +182,60 @@ mod tests {
         let base: Vec<String> = (0..1000).map(|i| i.to_string()).collect();
         let append: Vec<String> = (500..1500).map(|i| i.to_string()).collect();
         let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
-        assert_eq!(result.len(), 1500, "Should handle large arrays correctly");
+        assert_eq!(result.len(), 2000, "Should handle large arrays correctly");
 
         // Test removing many items
         let remove: Vec<String> = (0..800).map(|i| i.to_string()).collect();
         let result = ArrayProcessor::process(&base, &remove, ArrayOperation::Remove);
         assert_eq!(result.len(), 200, "Should handle removing many items");
+    }
+
+    #[test]
+    fn test_numeric_arrays() {
+        // Test simple numeric array
+        let base = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+        let append = vec!["4".to_string(), "5".to_string()];
+        let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
+        assert_eq!(result, vec!["1", "2", "3", "4", "5"]);
+
+        // Test array with decimals
+        let base = vec!["1.0".to_string(), "1.08".to_string(), "-0.06".to_string()];
+        let append = vec!["0.5".to_string()];
+        let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
+        assert_eq!(result, vec!["1.0", "1.08", "-0.06", "0.5"]);
+    }
+
+    #[test]
+    fn test_nested_numeric_arrays() {
+        // Test colorCorrections-style nested array
+        let base = vec![
+            "1".to_string(), "1".to_string(), "0".to_string(),
+            "{0,0,0,0}".to_string(),
+            "{1,1,1,1}".to_string(),
+            "{0,0,0,0}".to_string()
+        ];
+        let append = vec![
+            "1".to_string(), "1.08".to_string(), "-0.06".to_string(),
+            "{0.5,0.5,0.5,0}".to_string(),
+            "{1.0,1.0,1.0,1.21}".to_string(),
+            "{0.09,0.09,0.09,0.0}".to_string()
+        ];
+        let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
+        assert_eq!(result, vec![
+            "1", "1", "0",
+            "{0,0,0,0}",
+            "{1,1,1,1}",
+            "{0,0,0,0}",
+            "1", "1.08", "-0.06",
+            "{0.5,0.5,0.5,0}",
+            "{1.0,1.0,1.0,1.21}",
+            "{0.09,0.09,0.09,0.0}"
+        ]);
+
+        // Test filmGrain-style array
+        let base = vec!["0".to_string(), "0".to_string(), "0".to_string(), "0".to_string(), "0".to_string()];
+        let append = vec!["0.1".to_string(), "0.2".to_string(), "0.3".to_string(), "0.4".to_string(), "0.5".to_string()];
+        let result = ArrayProcessor::process(&base, &append, ArrayOperation::Append);
+        assert_eq!(result, vec!["0", "0", "0", "0", "0", "0.1", "0.2", "0.3", "0.4", "0.5"]);
     }
 }

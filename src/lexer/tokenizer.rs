@@ -88,7 +88,13 @@ impl<'a> Tokenizer<'a> {
                             return Err(self.error("Unexpected '/' character"));
                         }
                     },
-                    '#' => self.read_preprocessor_directive()?,
+                    '#' => {
+                        if matches!(self.peek_next(), Some('(')) {
+                            self.read_argb_color()?
+                        } else {
+                            self.read_preprocessor_directive()?
+                        }
+                    },
                     c if c.is_ascii_digit() => self.read_number()?,
                     c if c.is_ascii_alphabetic() || c == '_' || c == '\\' => self.read_identifier(),
                     _ => return Err(self.error(&format!("Unexpected character: {}", c))),
@@ -360,6 +366,150 @@ impl<'a> Tokenizer<'a> {
             )
         }
     }
+
+    fn read_argb_color(&mut self) -> Result<Token, Error> {
+        self.advance(); // Skip '#'
+        if !self.match_char('(') {
+            return Err(self.error("Expected '(' after '#' in ARGB color"));
+        }
+
+        // Expect "argb"
+        let format = self.read_identifier();
+        if format != Token::Identifier("argb".to_string()) {
+            return Err(self.error("Expected 'argb' in color format"));
+        }
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after 'argb'"));
+        }
+
+        // Read size_x
+        self.skip_whitespace();
+        let size_x = self.read_number()?.to_u8()?;
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after size_x"));
+        }
+
+        // Read size_y
+        self.skip_whitespace();
+        let size_y = self.read_number()?.to_u8()?;
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after size_y"));
+        }
+
+        // Read channels
+        self.skip_whitespace();
+        let channels = self.read_number()?.to_u8()?;
+
+        if !self.match_char(')') {
+            return Err(self.error("Expected ')' after channels"));
+        }
+
+        // Parse the color values
+        self.skip_whitespace();
+        if !self.match_char_str("color(") {
+            return Err(self.error("Expected 'color(' after ARGB format"));
+        }
+
+        // Read r,g,b,a values
+        self.skip_whitespace();
+        let r = self.read_number()?.to_f64()?;
+        if r < 0.0 || r > 1.0 {
+            return Err(self.error("Color values must be between 0 and 1"));
+        }
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after red value"));
+        }
+
+        self.skip_whitespace();
+        let g = self.read_number()?.to_f64()?;
+        if g < 0.0 || g > 1.0 {
+            return Err(self.error("Color values must be between 0 and 1"));
+        }
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after green value"));
+        }
+
+        self.skip_whitespace();
+        let b = self.read_number()?.to_f64()?;
+        if b < 0.0 || b > 1.0 {
+            return Err(self.error("Color values must be between 0 and 1"));
+        }
+
+        if !self.match_char(',') {
+            return Err(self.error("Expected ',' after blue value"));
+        }
+
+        self.skip_whitespace();
+        let a = self.read_number()?.to_f64()?;
+        if a < 0.0 || a > 1.0 {
+            return Err(self.error("Color values must be between 0 and 1"));
+        }
+
+        if !self.match_char(')') {
+            return Err(self.error("Expected ')' after alpha value"));
+        }
+
+        Ok(Token::ARGBColor(size_x, size_y, channels, r, g, b, a))
+    }
+
+    fn match_char_str(&mut self, s: &str) -> bool {
+        let mut chars = s.chars();
+        let mut input_copy = self.input.clone();
+        
+        while let Some(expected) = chars.next() {
+            match input_copy.next() {
+                Some(c) if c == expected => continue,
+                _ => return false,
+            }
+        }
+        
+        // If we matched all chars, advance the real input
+        for _ in 0..s.len() {
+            self.advance();
+        }
+        true
+    }
+}
+
+trait ToNumber {
+    fn to_u8(&self) -> Result<u8, Error>;
+    fn to_f64(&self) -> Result<f64, Error>;
+}
+
+impl ToNumber for Token {
+    fn to_u8(&self) -> Result<u8, Error> {
+        match self {
+            Token::NumberLiteral(n) => {
+                if *n >= 0.0 && *n <= 255.0 && n.fract() == 0.0 {
+                    Ok(*n as u8)
+                } else {
+                    Err(Error::LexerError {
+                        message: format!("Invalid u8 value: {}", n),
+                        location: SourceLocation::unknown()
+                    })
+                }
+            },
+            _ => Err(Error::LexerError {
+                message: "Expected number".to_string(),
+                location: SourceLocation::unknown()
+            })
+        }
+    }
+
+    fn to_f64(&self) -> Result<f64, Error> {
+        match self {
+            Token::NumberLiteral(n) => Ok(*n),
+            _ => Err(Error::LexerError {
+                message: "Expected number".to_string(),
+                location: SourceLocation::unknown()
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -476,5 +626,28 @@ mod tests {
         
         // The path should be a single identifier token
         assert!(tokens.contains(&Token::Identifier(r#"\rhsusf\addons\rhsusf_infantry2\gear\head\data\rhs_helmet_mich_des_co.paa"#.to_string())));
+    }
+
+    #[test]
+    fn test_argb_color() {
+        let input = r#"#(argb,8,8,3)color(1,1,1,1)"#;
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize().unwrap();
+        
+        assert_eq!(tokens, vec![
+            Token::ARGBColor(8, 8, 3, 1.0, 1.0, 1.0, 1.0),
+        ]);
+
+        // Test invalid formats
+        let invalid_inputs = vec![
+            "#(rgb,8,8,3)color(1,1,1,1)",  // wrong format name
+            "#(argb,256,8,3)color(1,1,1,1)",  // invalid size_x
+            "#(argb,8,8,3)color(2,1,1,1)",  // invalid color value > 1
+        ];
+
+        for input in invalid_inputs {
+            let mut tokenizer = Tokenizer::new(input);
+            assert!(tokenizer.tokenize().is_err());
+        }
     }
 }

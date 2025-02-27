@@ -12,6 +12,7 @@ pub enum Token {
     StringLiteral(String),
     NumberLiteral(f64),
     BooleanLiteral(bool),
+    ARGBColor(u8, u8, u8, f64, f64, f64, f64), // size_x, size_y, channels, r, g, b, a
     
     // Symbols
     LeftBrace,
@@ -44,7 +45,8 @@ impl Token {
         matches!(self,
             Token::StringLiteral(_) |
             Token::NumberLiteral(_) |
-            Token::BooleanLiteral(_)
+            Token::BooleanLiteral(_) |
+            Token::ARGBColor(_, _, _, _, _, _, _)
         )
     }
 
@@ -74,6 +76,7 @@ mod tests {
         assert!(Token::StringLiteral("test".to_string()).is_literal());
         assert!(Token::NumberLiteral(42.0).is_literal());
         assert!(Token::BooleanLiteral(true).is_literal());
+        assert!(Token::ARGBColor(1, 1, 3, 0.0, 0.0, 0.0, 0.0).is_literal());
         assert!(!Token::Class.is_literal());
         assert!(!Token::Equals.is_literal());
     }

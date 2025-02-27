@@ -34,19 +34,25 @@ impl AstVisitor for ArrayVisitor {
             return Ok(());
         };
 
-        // For array operations, we just need to apply the operation directly
-        // No need for temporary array or base array (the actual combining with 
-        // parent arrays happens in inheritance resolution)
+        // For array operations, we need to handle duplicates appropriately
         match op {
             ArrayOperation::Replace => {
-                // Replace operation doesn't need any special handling
+                // Replace operation keeps duplicates
                 // The array already contains the values it should have
             },
             ArrayOperation::Append => {
-                // We don't need to modify the values here, as this is handled during inheritance
+                // For append, we need to ensure no duplicates within the array
+                let mut unique: Vec<String> = Vec::new();
+                for item in array.iter() {
+                    if !unique.contains(item) {
+                        unique.push(item.clone());
+                    }
+                }
+                *array = unique;
             },
             ArrayOperation::Remove => {
-                // We don't need to modify the values here, as this is handled during inheritance
+                // Remove operation doesn't need duplicate handling
+                // The array already contains just the items to remove
             }
         }
 

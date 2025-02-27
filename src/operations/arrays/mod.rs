@@ -19,10 +19,14 @@ impl ArrayProcessor {
     }
 
     fn append_operation(base: &[String], to_append: &[String]) -> Vec<String> {
-        // For arrays, we should preserve duplicates since position matters
+        // For array append operations, we should remove duplicates
         let mut result = base.to_vec();
-        result.extend(to_append.iter().cloned());
-                        result
+        for item in to_append {
+            if !result.contains(item) {
+                result.push(item.clone());
+            }
+        }
+        result
     }
 
     fn remove_operation(base: &[String], to_remove: &[String]) -> Vec<String> {

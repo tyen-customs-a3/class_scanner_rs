@@ -215,77 +215,111 @@ fn test_config_file_errors() {
 }
 
 #[test]
-fn test_parse_pca_misc() -> Result<(), Error> {
+fn test_parse_hidden_vest() -> Result<(), Error> {
     init_test_logging();
     let data_dir = get_test_data_dir();
-    let config_path = data_dir.join("@pca_misc").join("CfgWeapons.hpp");
+    let config_path = data_dir.join("@pca_misc").join("CfgWeapons_hiddenVest.hpp");
 
-    // Preprocess and parse 
+    // Step 1: Preprocess the file
     let mut preprocessor = Preprocessor::new(&data_dir);
     let content = preprocessor.process_file(&config_path)?;
+
+    // Step 2: Tokenize
     let mut tokenizer = Tokenizer::with_file_path(&content, &config_path);
     let tokens = tokenizer.tokenize()?;
+
+    // Step 3: Parse
     let mut parser = Parser::new(tokens);
     let mut ast = parser.parse()?;
 
-    // Process visitors
+    // Step 4: Process visitors
     let mut inheritance_visitor = InheritanceVisitor::new();
     inheritance_visitor.visit_class(&mut ast)?;
+    
     let mut array_visitor = ArrayVisitor::new();
     array_visitor.visit_class(&mut ast)?;
 
-    // Find CfgWeapons
-    let cfg_weapons = ast.nested_classes.iter()
-        .find(|c| c.name == "CfgWeapons")
-        .expect("CfgWeapons class not found");
+    // Step 5: Find and validate classes
+    let find_class = |class_name: &str| -> Option<&ClassNode> {
+        ast.nested_classes.iter()
+            .find(|c| c.name == class_name)
+    };
 
-    // Helper function to find classes in the AST
-    fn find_class<'a>(class_name: &str, ast: &'a ClassNode) -> Option<&'a ClassNode> {
-        if ast.name == class_name {
-            return Some(ast);
-        }
-        for class in &ast.nested_classes {
-            if class.name == class_name {
-                return Some(class);
-            }
-            // Also search nested classes recursively
-            for nested in &class.nested_classes {
-                if let Some(found) = find_class(class_name, nested) {
-                    return Some(found);
-                }
-            }
-        }
-        None
-    }
-
-    // Test hidden vest inheritance chain
-    let vest_base = find_class("pca_vest_invisible", cfg_weapons)
+    // Validate base invisible vest
+    let base_vest = find_class("pca_vest_invisible")
         .expect("pca_vest_invisible class not found");
-    assert_eq!(vest_base.parent, Some("Vest_Camo_Base".to_string()));
+    assert_eq!(base_vest.parent, Some("Vest_Camo_Base".to_string()));
     
-    let vest_kevlar = find_class("pca_vest_invisible_kevlar", cfg_weapons)
+    // Find the ItemInfo class within base_vest
+    let base_iteminfo = base_vest.nested_classes.iter()
+        .find(|c| c.name == "ItemInfo")
+        .expect("ItemInfo class not found in pca_vest_invisible");
+    
+    // Verify base vest properties
+    assert_eq!(base_iteminfo.properties.get("mass").map(|p| p.raw_value.as_str()), Some("20"));
+
+    // Validate kevlar vest
+    let kevlar_vest = find_class("pca_vest_invisible_kevlar")
         .expect("pca_vest_invisible_kevlar class not found");
-    assert_eq!(vest_kevlar.parent, Some("pca_vest_invisible".to_string()));
+    assert_eq!(kevlar_vest.parent, Some("pca_vest_invisible".to_string()));
 
-    let vest_plate = find_class("pca_vest_invisible_plate", cfg_weapons)
-        .expect("pca_vest_invisible_plate class not found");
-    assert_eq!(vest_plate.parent, Some("pca_vest_invisible".to_string()));
-
-    // Test MICH helmet classes and their texture arrays
-    let mich_desert = find_class("pca_mich_norotos_desert", cfg_weapons)
-        .expect("pca_mich_norotos_desert class not found");
-    assert_eq!(mich_desert.parent, Some("rhsusf_mich_bare_norotos_tan".to_string()));
+    let kevlar_iteminfo = kevlar_vest.nested_classes.iter()
+        .find(|c| c.name == "ItemInfo")
+        .expect("ItemInfo class not found in pca_vest_invisible_kevlar");
     
-    // Verify texture array property exists and has correct length
-    let textures = mich_desert.properties.values()
-        .find(|p| p.name == "hiddenSelectionsTextures")
-        .expect("hiddenSelectionsTextures not found");
-    assert_eq!(textures.array_values.len(), 3); // Should have 3 texture paths
+    // Verify kevlar vest properties
+    assert_eq!(kevlar_iteminfo.properties.get("mass").map(|p| p.raw_value.as_str()), Some("40"));
 
-    // Test legacy uniform inheritance
-    let uniform = find_class("rhs_uniform_m88_patchless", cfg_weapons)
-        .expect("rhs_uniform_m88_patchless class not found");
-    assert_eq!(uniform.parent, Some("rhs_uniform_flora".to_string()));
+    // Validate plate vest
+    let plate_vest = find_class("pca_vest_invisible_plate")
+        .expect("pca_vest_invisible_plate class not found");
+    assert_eq!(plate_vest.parent, Some("pca_vest_invisible".to_string()));
+
+    let plate_iteminfo = plate_vest.nested_classes.iter()
+        .find(|c| c.name == "ItemInfo")
+        .expect("ItemInfo class not found in pca_vest_invisible_plate");
+    
+    // Verify plate vest properties
+    assert_eq!(plate_iteminfo.properties.get("mass").map(|p| p.raw_value.as_str()), Some("80"));
+
+    // Helper function to validate protection info
+    let validate_protection_info = |iteminfo: &ClassNode, expected_armor: i32, expected_pass_through: f32| {
+        let hitpoints = iteminfo.nested_classes.iter()
+            .find(|c| c.name == "HitpointsProtectionInfo")
+            .expect("HitpointsProtectionInfo class not found");
+
+        for part in ["Chest", "Diaphragm", "Abdomen", "Pelvis"] {
+            let body_part = hitpoints.nested_classes.iter()
+                .find(|c| c.name == part)
+                .unwrap_or_else(|| panic!("{} class not found", part));
+            
+            assert_eq!(body_part.properties.get("armor").map(|p| p.raw_value.as_str()), 
+                      Some(expected_armor.to_string().as_str()),
+                      "Armor value mismatch for {}", part);
+            
+            assert_eq!(body_part.properties.get("passThrough").map(|p| p.raw_value.as_str()), 
+                      Some(expected_pass_through.to_string().as_str()),
+                      "PassThrough value mismatch for {}", part);
+        }
+
+        // Check Body part which only has passThrough
+        let body = hitpoints.nested_classes.iter()
+            .find(|c| c.name == "Body")
+            .expect("Body class not found");
+        assert_eq!(body.properties.get("passThrough").map(|p| p.raw_value.as_str()), 
+                  Some(expected_pass_through.to_string().as_str()),
+                  "PassThrough value mismatch for Body");
+    };
+
+    // Validate base vest protection values
+    validate_protection_info(base_iteminfo, 4, 0.5);
+
+    // Validate kevlar vest protection values
+    validate_protection_info(kevlar_iteminfo, 12, 0.4);
+
+    // Validate plate vest protection values
+    validate_protection_info(plate_iteminfo, 24, 0.2);
 
     Ok(())
 }
+

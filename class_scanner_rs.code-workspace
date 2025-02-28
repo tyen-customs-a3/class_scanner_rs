@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "../../python/class_scanner_py"
 		}
 	],
 	"settings": {}

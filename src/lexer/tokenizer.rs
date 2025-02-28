@@ -96,14 +96,40 @@ impl<'a> Tokenizer<'a> {
                         }
                     },
                     c if c.is_ascii_digit() => {
-                        // Look ahead to see if this is part of an identifier
+                        // Check if this could be scientific notation by looking ahead
                         let mut iter = self.input.clone();
-                        iter.next(); // Skip current digit
-                        match iter.next() {
-                            // If next char is a letter, treat whole thing as identifier
-                            Some(next) if next.is_ascii_alphabetic() => self.read_identifier(),
-                            // Otherwise treat as number
-                            _ => self.read_number()?
+                        let mut is_potential_number = true;
+                        let mut seen_e = false;
+                        
+                        while let Some(next) = iter.next() {
+                            match next {
+                                '0'..='9' => continue,
+                                'e' | 'E' if !seen_e => {
+                                    seen_e = true;
+                                    // Look ahead one more to check for +/- or digit
+                                    match iter.next() {
+                                        Some('-') | Some('+') | Some('0'..='9') => continue,
+                                        _ => {
+                                            is_potential_number = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                '.' if !seen_e => continue,
+                                _ => {
+                                    if !next.is_ascii_alphabetic() {
+                                        break;
+                                    }
+                                    is_potential_number = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if is_potential_number {
+                            self.read_number()?
+                        } else {
+                            self.read_identifier()
                         }
                     },
                     c if c.is_ascii_alphabetic() || c == '_' || c == '\\' => self.read_identifier(),
@@ -139,7 +165,7 @@ impl<'a> Tokenizer<'a> {
         let mut has_dot = false;
         let mut has_e = false;
 
-        // Handle negative numbers
+        // Handle negative numbers at start
         if self.peek() == Some('-') {
             number.push('-');
             self.advance();
@@ -150,6 +176,7 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
+        // Main number parsing loop
         while let Some(c) = self.peek() {
             match c {
                 '0'..='9' => {
@@ -167,26 +194,42 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 'e' | 'E' if !has_e => {
-                    has_e = true;
-                    number.push('e');
+                    // Look ahead to ensure this is actually scientific notation
+                    // and not the start of an identifier
+                    let mut peek_iter = self.input.clone();
+                    peek_iter.next(); // Skip 'e'
+                    match peek_iter.next() {
+                        Some(next) if next == '-' || next == '+' || next.is_ascii_digit() => {
+                            has_e = true;
+                            number.push('e');
+                            self.advance();
+                            
+                            // Handle optional + or - after e
+                            match self.peek() {
+                                Some('+') => {
+                                    self.advance(); // Skip the plus sign
+                                }
+                                Some('-') => {
+                                    number.push('-');
+                                    self.advance();
+                                }
+                                Some('0'..='9') => {}, // Digit directly after e is fine
+                                _ => return Err(self.error("Expected '+', '-' or digit after 'e' in scientific notation"))
+                            }
+
+                            // Look ahead for digits in the exponent
+                            if !matches!(self.peek(), Some('0'..='9')) {
+                                return Err(self.error("Expected digit in scientific notation exponent"));
+                            }
+                        }
+                        // If next char isn't a valid scientific notation continuation,
+                        // treat this as the end of the number and let it be handled as part of an identifier
+                        _ => break,
+                    }
+                }
+                _ if has_e && matches!(c, '0'..='9') => {
+                    number.push(c);
                     self.advance();
-                    
-                    // Handle optional + or - after e
-                    match self.peek() {
-                        Some('+') => {
-                            self.advance();
-                        }
-                        Some('-') => {
-                            number.push('-');
-                            self.advance();
-                        }
-                        _ => {}
-                    }
-                    
-                    // There must be at least one digit after e
-                    if !matches!(self.peek(), Some('0'..='9')) {
-                        return Err(self.error("Expected digit after 'e' in scientific notation"));
-                    }
                 }
                 _ => break,
             }
@@ -194,7 +237,7 @@ impl<'a> Tokenizer<'a> {
 
         match number.parse::<f64>() {
             Ok(n) => Ok(Token::new(TokenType::NumberLiteral(n), line, column)),
-            Err(_) => Err(self.error(&format!("Invalid number: {}", number))),
+            Err(_) => Err(self.error(&format!("Invalid number format: {}", number))),
         }
     }
 
@@ -802,8 +845,13 @@ mod tests {
             ("1.23e5", 1.23e5),
             ("1.23e-5", 1.23e-5),
             ("3e-5", 3e-5),
+            ("3e-05", 3e-5),  // Test with leading zeros in exponent
             ("-1.23e-5", -1.23e-5),
             ("1E5", 1e5),  // Test uppercase E
+            ("0.008", 0.008),  // Test regular decimal
+            ("0.014", 0.014),  // Test regular decimal
+            ("3e-05", 3e-5),   // Test the exact case from the file
+            ("5", 5.0),        // Test integer
         ];
 
         for (input, expected) in inputs {
@@ -812,17 +860,18 @@ mod tests {
             assert_eq!(
                 result,
                 vec![Token::new(TokenType::NumberLiteral(expected), 1, 0)],
-                "Failed for input: {}", input
+                "Failed for input: {}. Got: {:?}", input, result
             );
         }
 
         // Test invalid scientific notation
         let invalid_inputs = vec![
-            "1e",    // No exponent
-            "1e-",   // No exponent after minus
-            "1.2e",  // No exponent
-            "e5",    // No mantissa
+            "1e",      // No exponent
+            "1e-",     // No exponent after minus
+            "1.2e",    // No exponent
+            "e5",      // No mantissa
             "1.2.3e5", // Multiple decimal points
+            "1e2.5",   // Decimal in exponent
         ];
 
         for input in invalid_inputs {

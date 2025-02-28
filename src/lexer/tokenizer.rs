@@ -1,4 +1,4 @@
-use super::tokens::Token;
+use super::tokens::{Token, TokenType};
 use crate::error::{Error, SourceLocation};
 use std::iter::Peekable;
 use std::str::Chars;
@@ -55,20 +55,20 @@ impl<'a> Tokenizer<'a> {
             None => Ok(None),
             Some(c) => {
                 let token = match c {
-                    '{' => self.single_char_token(Token::LeftBrace),
-                    '}' => self.single_char_token(Token::RightBrace),
+                    '{' => self.single_char_token(TokenType::LeftBrace),
+                    '}' => self.single_char_token(TokenType::RightBrace),
                     '[' => {
                         self.advance();
                         if self.match_char(']') {
-                            Token::ArrayMarker
+                            Token::new(TokenType::ArrayMarker, self.line, self.column)
                         } else {
-                            Token::LeftBracket
+                            Token::new(TokenType::LeftBracket, self.line, self.column)
                         }
                     },
-                    ']' => self.single_char_token(Token::RightBracket),
-                    ';' => self.single_char_token(Token::Semicolon),
-                    ':' => self.single_char_token(Token::Colon),
-                    ',' => self.single_char_token(Token::Comma),
+                    ']' => self.single_char_token(TokenType::RightBracket),
+                    ';' => self.single_char_token(TokenType::Semicolon),
+                    ':' => self.single_char_token(TokenType::Colon),
+                    ',' => self.single_char_token(TokenType::Comma),
                     '=' => self.handle_equals()?,
                     '+' => self.handle_plus()?,
                     '-' => {
@@ -95,7 +95,17 @@ impl<'a> Tokenizer<'a> {
                             self.read_preprocessor_directive()?
                         }
                     },
-                    c if c.is_ascii_digit() => self.read_number()?,
+                    c if c.is_ascii_digit() => {
+                        // Look ahead to see if this is part of an identifier
+                        let mut iter = self.input.clone();
+                        iter.next(); // Skip current digit
+                        match iter.next() {
+                            // If next char is a letter, treat whole thing as identifier
+                            Some(next) if next.is_ascii_alphabetic() => self.read_identifier(),
+                            // Otherwise treat as number
+                            _ => self.read_number()?
+                        }
+                    },
                     c if c.is_ascii_alphabetic() || c == '_' || c == '\\' => self.read_identifier(),
                     _ => return Err(self.error(&format!("Unexpected character: {}", c))),
                 };
@@ -105,13 +115,15 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn read_string(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         self.advance(); // Skip opening quote
         let mut string = String::new();
         
         while let Some(c) = self.peek() {
             if c == '"' {
                 self.advance(); // Skip closing quote
-                return Ok(Token::StringLiteral(string));
+                return Ok(Token::new(TokenType::StringLiteral(string), line, column));
             }
             string.push(c);
             self.advance();
@@ -121,8 +133,11 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn read_number(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         let mut number = String::new();
         let mut has_dot = false;
+        let mut has_e = false;
 
         // Handle negative numbers
         if self.peek() == Some('-') {
@@ -141,7 +156,7 @@ impl<'a> Tokenizer<'a> {
                     number.push(c);
                     self.advance();
                 }
-                '.' if !has_dot => {
+                '.' if !has_dot && !has_e => {
                     has_dot = true;
                     number.push(c);
                     self.advance();
@@ -151,19 +166,44 @@ impl<'a> Tokenizer<'a> {
                         return Err(self.error("Expected digit after decimal point"));
                     }
                 }
+                'e' | 'E' if !has_e => {
+                    has_e = true;
+                    number.push('e');
+                    self.advance();
+                    
+                    // Handle optional + or - after e
+                    match self.peek() {
+                        Some('+') => {
+                            self.advance();
+                        }
+                        Some('-') => {
+                            number.push('-');
+                            self.advance();
+                        }
+                        _ => {}
+                    }
+                    
+                    // There must be at least one digit after e
+                    if !matches!(self.peek(), Some('0'..='9')) {
+                        return Err(self.error("Expected digit after 'e' in scientific notation"));
+                    }
+                }
                 _ => break,
             }
         }
 
         match number.parse::<f64>() {
-            Ok(n) => Ok(Token::NumberLiteral(n)),
+            Ok(n) => Ok(Token::new(TokenType::NumberLiteral(n), line, column)),
             Err(_) => Err(self.error(&format!("Invalid number: {}", number))),
         }
     }
 
     fn read_identifier(&mut self) -> Token {
+        let line = self.line;
+        let column = self.column;
         let mut ident = String::new();
         
+        // Allow digits in first position for identifiers
         while let Some(c) = self.peek() {
             if c.is_ascii_alphanumeric() || c == '_' || c == '\\' || c == '.' {
                 ident.push(c);
@@ -173,16 +213,19 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        match ident.as_str() {
-            "class" => Token::Class,
-            "public" => Token::Public,
-            "private" => Token::Private,
-            "include" => Token::Include,
-            "define" => Token::Define,
-            "true" => Token::BooleanLiteral(true),
-            "false" => Token::BooleanLiteral(false),
-            _ => Token::Identifier(ident),
-        }
+        let token_type = match ident.as_str() {
+            "class" => TokenType::Class,
+            "enum" => TokenType::Enum,
+            "public" => TokenType::Public,
+            "private" => TokenType::Private,
+            "include" => TokenType::Include,
+            "define" => TokenType::Define,
+            "true" => TokenType::BooleanLiteral(true),
+            "false" => TokenType::BooleanLiteral(false),
+            _ => TokenType::Identifier(ident),
+        };
+
+        Token::new(token_type, line, column)
     }
 
     fn read_line_comment(&mut self) -> Result<Token, Error> {
@@ -199,7 +242,7 @@ impl<'a> Tokenizer<'a> {
         }
 
         if self.preserve_comments {
-            Ok(Token::Comment(comment))
+            Ok(Token::new(TokenType::Comment(comment), self.line, self.column))
         } else {
             self.next_token()?
                 .ok_or_else(|| self.error("Unexpected end of input after comment"))
@@ -242,7 +285,7 @@ impl<'a> Tokenizer<'a> {
         }
 
         if self.preserve_comments {
-            Ok(Token::Comment(comment))
+            Ok(Token::new(TokenType::Comment(comment), self.line, self.column))
         } else {
             self.next_token()?
                 .ok_or_else(|| self.error("Unexpected end of input after comment"))
@@ -253,28 +296,34 @@ impl<'a> Tokenizer<'a> {
         self.advance(); // Skip '#'
         let directive = self.read_identifier();
         
-        match directive {
-            Token::Include => Ok(Token::Include),
-            Token::Define => Ok(Token::Define),
+        match directive.token_type {
+            TokenType::Include => Ok(Token::new(TokenType::Include, directive.line, directive.column)),
+            TokenType::Define => Ok(Token::new(TokenType::Define, directive.line, directive.column)),
             _ => Err(self.error("Unknown preprocessor directive")),
         }
     }
 
     fn handle_equals(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         self.advance();
-        Ok(Token::Equals)
+        Ok(Token::new(TokenType::Equals, line, column))
     }
 
     fn handle_plus(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         self.advance();
         if self.match_char('=') {
-            Ok(Token::PlusEquals)
+            Ok(Token::new(TokenType::PlusEquals, line, column))
         } else {
             Err(self.error("Expected '=' after '+'"))
         }
     }
 
     fn handle_minus(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         self.advance();
         
         // Check if next character is a digit (negative number)
@@ -283,7 +332,7 @@ impl<'a> Tokenizer<'a> {
             self.column -= 1;
             self.read_number()
         } else if self.match_char('=') {
-            Ok(Token::MinusEquals)
+            Ok(Token::new(TokenType::MinusEquals, line, column))
         } else {
             Err(self.error("Expected '=' after '-' or digit for negative number"))
         }
@@ -335,9 +384,11 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn single_char_token(&mut self, token: Token) -> Token {
+    fn single_char_token(&mut self, token_type: TokenType) -> Token {
+        let line = self.line;
+        let column = self.column;
         self.advance();
-        token
+        Token::new(token_type, line, column)
     }
 
     fn error(&self, message: &str) -> Error {
@@ -352,6 +403,8 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn read_argb_color(&mut self) -> Result<Token, Error> {
+        let line = self.line;
+        let column = self.column;
         self.advance(); // Skip '#'
         if !self.match_char('(') {
             return Err(self.error("Expected '(' after '#' in ARGB color"));
@@ -359,7 +412,7 @@ impl<'a> Tokenizer<'a> {
 
         // Expect "argb"
         let format = self.read_identifier();
-        if format != Token::Identifier("argb".to_string()) {
+        if format.token_type != TokenType::Identifier("argb".to_string()) {
             return Err(self.error("Expected 'argb' in color format"));
         }
 
@@ -438,7 +491,7 @@ impl<'a> Tokenizer<'a> {
             return Err(self.error("Expected ')' after alpha value"));
         }
 
-        Ok(Token::ARGBColor(size_x, size_y, channels, r, g, b, a))
+        Ok(Token::new(TokenType::ARGBColor(size_x, size_y, channels, r, g, b, a), line, column))
     }
 
     fn match_char_str(&mut self, s: &str) -> bool {
@@ -467,10 +520,10 @@ trait ToNumber {
 
 impl ToNumber for Token {
     fn to_u8(&self) -> Result<u8, Error> {
-        match self {
-            Token::NumberLiteral(n) => {
-                if *n >= 0.0 && *n <= 255.0 && n.fract() == 0.0 {
-                    Ok(*n as u8)
+        match self.token_type {
+            TokenType::NumberLiteral(n) => {
+                if n >= 0.0 && n <= 255.0 && n.fract() == 0.0 {
+                    Ok(n as u8)
                 } else {
                     Err(Error::LexerError {
                         message: format!("Invalid u8 value: {}", n),
@@ -486,8 +539,8 @@ impl ToNumber for Token {
     }
 
     fn to_f64(&self) -> Result<f64, Error> {
-        match self {
-            Token::NumberLiteral(n) => Ok(*n),
+        match self.token_type {
+            TokenType::NumberLiteral(n) => Ok(n),
             _ => Err(Error::LexerError {
                 message: "Expected number".to_string(),
                 location: SourceLocation::unknown()
@@ -507,11 +560,11 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::Class,
-            Token::Identifier("MyClass".to_string()),
-            Token::LeftBrace,
-            Token::Public,
-            Token::RightBrace,
+            Token::new(TokenType::Class, 1, 0),
+            Token::new(TokenType::Identifier("MyClass".to_string()), 1, 6),
+            Token::new(TokenType::LeftBrace, 1, 14),
+            Token::new(TokenType::Public, 1, 16),
+            Token::new(TokenType::RightBrace, 1, 22),
         ]);
     }
 
@@ -522,8 +575,8 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         // All strings are treated as literal - no escape character processing
-        assert!(tokens.contains(&Token::StringLiteral("hello world".to_string())));
-        assert!(tokens.contains(&Token::StringLiteral(r"no escape chars \\ \n \t allowed".to_string())));
+        assert!(tokens.contains(&Token::new(TokenType::StringLiteral("hello world".to_string()), 1, 12)));
+        assert!(tokens.contains(&Token::new(TokenType::StringLiteral(r"no escape chars \\ \n \t allowed".to_string()), 1, 26)));
     }
 
     #[test]
@@ -532,9 +585,9 @@ mod tests {
         let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize().unwrap();
         
-        assert!(tokens.contains(&Token::NumberLiteral(123.0)));
-        assert!(tokens.contains(&Token::NumberLiteral(-456.0)));
-        assert!(tokens.contains(&Token::NumberLiteral(789.0)));
+        assert!(tokens.contains(&Token::new(TokenType::NumberLiteral(123.0), 1, 0)));
+        assert!(tokens.contains(&Token::new(TokenType::NumberLiteral(-456.0), 1, 4)));
+        assert!(tokens.contains(&Token::new(TokenType::NumberLiteral(789.0), 1, 9)));
     }
 
     #[test]
@@ -543,9 +596,9 @@ mod tests {
         let mut tokenizer = Tokenizer::new(input).with_comments(true);
         let tokens = tokenizer.tokenize().unwrap();
         
-        assert!(tokens.contains(&Token::Comment(" Line comment".to_string())));
-        assert!(tokens.contains(&Token::Comment(" Block comment ".to_string())));
-        assert!(tokens.contains(&Token::Class));
+        assert!(tokens.contains(&Token::new(TokenType::Comment(" Line comment".to_string()), 1, 0)));
+        assert!(tokens.contains(&Token::new(TokenType::Comment(" Block comment ".to_string()), 2, 0)));
+        assert!(tokens.contains(&Token::new(TokenType::Class, 3, 0)));
     }
 
     #[test]
@@ -555,9 +608,9 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::Equals,
-            Token::PlusEquals,
-            Token::MinusEquals,
+            Token::new(TokenType::Equals, 1, 0),
+            Token::new(TokenType::PlusEquals, 1, 2),
+            Token::new(TokenType::MinusEquals, 1, 5),
         ]);
     }
 
@@ -568,8 +621,8 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::ArrayMarker,
-            Token::LeftBracket,
+            Token::new(TokenType::ArrayMarker, 1, 0),
+            Token::new(TokenType::LeftBracket, 1, 3),
         ]);
     }
 
@@ -580,8 +633,8 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::Include,
-            Token::Define,
+            Token::new(TokenType::Include, 1, 0),
+            Token::new(TokenType::Define, 1, 9),
         ]);
     }
 
@@ -610,7 +663,7 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         // The path should be a single identifier token
-        assert!(tokens.contains(&Token::Identifier(r#"\rhsusf\addons\rhsusf_infantry2\gear\head\data\rhs_helmet_mich_des_co.paa"#.to_string())));
+        assert!(tokens.contains(&Token::new(TokenType::Identifier(r#"\rhsusf\addons\rhsusf_infantry2\gear\head\data\rhs_helmet_mich_des_co.paa"#.to_string()), 1, 27)));
     }
 
     #[test]
@@ -620,7 +673,7 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::ARGBColor(8, 8, 3, 1.0, 1.0, 1.0, 1.0),
+            Token::new(TokenType::ARGBColor(8, 8, 3, 1.0, 1.0, 1.0, 1.0), 1, 0),
         ]);
 
         // Test invalid formats
@@ -643,7 +696,7 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
         
         assert_eq!(tokens, vec![
-            Token::StringLiteral(r#"\n \r \t \\"#.to_string()),
+            Token::new(TokenType::StringLiteral(r#"\n \r \t \\"#.to_string()), 1, 0),
         ]);
 
         let input2 = r#"scriptsPath = "A3\Functions_F\Scripts\";"#;
@@ -651,10 +704,10 @@ mod tests {
         let tokens = tokenizer.tokenize().unwrap();
 
         assert_eq!(tokens, vec![
-            Token::Identifier("scriptsPath".to_string()),
-            Token::Equals,
-            Token::StringLiteral(r#"A3\Functions_F\Scripts\"#.to_string()),
-            Token::Semicolon,
+            Token::new(TokenType::Identifier("scriptsPath".to_string()), 1, 0),
+            Token::new(TokenType::Equals, 1, 12),
+            Token::new(TokenType::StringLiteral(r#"A3\Functions_F\Scripts\"#.to_string()), 1, 14),
+            Token::new(TokenType::Semicolon, 1, 39),
         ]);
     }
 
@@ -673,7 +726,7 @@ mod tests {
             let result = tokenizer.tokenize().unwrap_or_else(|e| panic!("Case {} failed: {} | Input: {}", i, e, input));
             assert_eq!(
                 result,
-                vec![Token::StringLiteral(expected.to_string())],
+                vec![Token::new(TokenType::StringLiteral(expected.to_string()), 1, 0)],
                 "Case {} failed | Input: {}", i, input
             );
         }
@@ -712,10 +765,72 @@ mod tests {
             let tokens = result.unwrap();
             // Verify that backslashes are preserved exactly as they appear in the string
             for token in tokens {
-                if let Token::StringLiteral(s) = token {
+                if let TokenType::StringLiteral(s) = token.token_type {
                     assert_eq!(s, s.to_string(), "String content should be preserved exactly");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_numeric_identifiers() {
+        let inputs = vec![
+            ("3DEN", vec![Token::new(TokenType::Identifier("3DEN".to_string()), 1, 0)]),
+            ("123abc", vec![Token::new(TokenType::Identifier("123abc".to_string()), 1, 0)]),
+            ("3_way", vec![Token::new(TokenType::Identifier("3_way".to_string()), 1, 0)]),
+            // Make sure regular numbers still work
+            ("123", vec![Token::new(TokenType::NumberLiteral(123.0), 1, 0)]),
+            // Test number followed by space then identifier
+            ("123 abc", vec![
+                Token::new(TokenType::NumberLiteral(123.0), 1, 0),
+                Token::new(TokenType::Identifier("abc".to_string()), 1, 4),
+            ]),
+        ];
+
+        for (input, expected) in inputs {
+            let mut tokenizer = Tokenizer::new(input);
+            let result = tokenizer.tokenize().unwrap();
+            assert_eq!(result, expected, "Failed for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_scientific_notation() {
+        let inputs = vec![
+            ("1e5", 1e5),
+            ("1e-5", 1e-5),
+            ("1.23e5", 1.23e5),
+            ("1.23e-5", 1.23e-5),
+            ("3e-5", 3e-5),
+            ("-1.23e-5", -1.23e-5),
+            ("1E5", 1e5),  // Test uppercase E
+        ];
+
+        for (input, expected) in inputs {
+            let mut tokenizer = Tokenizer::new(input);
+            let result = tokenizer.tokenize().unwrap();
+            assert_eq!(
+                result,
+                vec![Token::new(TokenType::NumberLiteral(expected), 1, 0)],
+                "Failed for input: {}", input
+            );
+        }
+
+        // Test invalid scientific notation
+        let invalid_inputs = vec![
+            "1e",    // No exponent
+            "1e-",   // No exponent after minus
+            "1.2e",  // No exponent
+            "e5",    // No mantissa
+            "1.2.3e5", // Multiple decimal points
+        ];
+
+        for input in invalid_inputs {
+            let mut tokenizer = Tokenizer::new(input);
+            assert!(
+                tokenizer.tokenize().is_err(),
+                "Expected error for invalid scientific notation: {}", input
+            );
         }
     }
 }

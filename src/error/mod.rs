@@ -55,6 +55,14 @@ impl SourceLocation {
         self.file = Some(file);
         self
     }
+
+    pub fn with_context(&self) -> String {
+        match (&self.file, self.line) {
+            (Some(path), line) if line > 0 => format!(" at {}:{}", path.display(), line),
+            (None, line) if line > 0 => format!(" at line {}", line),
+            _ => String::new()
+        }
+    }
 }
 
 impl std::fmt::Display for SourceLocation {
@@ -65,3 +73,4 @@ impl std::fmt::Display for SourceLocation {
         }
     }
 }
+

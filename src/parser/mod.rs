@@ -192,18 +192,16 @@ impl Parser {
                 let mut values = Vec::new();
                 
                 while !self.check(Token::RightBrace) {
-                    match self.consume()? {
-                        Token::StringLiteral(s) => {
-                            let clean_str = s.trim_matches('"').to_string();
-                            values.push(clean_str);
-                        },
-                        Token::NumberLiteral(n) => values.push(n.to_string()),
-                        Token::Identifier(s) => values.push(s),
+                    let value = match self.consume()? {
+                        Token::StringLiteral(s) => s.trim_matches('"').to_string(),
+                        Token::NumberLiteral(n) => n.to_string(),
+                        Token::Identifier(s) => s,
                         _ => return Err(Error::ParseError {
                             message: "Invalid array element".to_string(),
                             location: SourceLocation::unknown()
                         }),
-                    }
+                    };
+                    values.push(value);
 
                     if !self.check(Token::RightBrace) {
                         self.expect_token(Token::Comma)?;
@@ -212,8 +210,10 @@ impl Parser {
                 
                 self.expect_token(Token::RightBrace)?;
                 
-                // Store array values without quotes
-                Ok((PropertyType::Array, format!("{{{}}}", values.join(",")), values))
+                // Format raw value without extra quotes
+                let raw_value = format!("{{{}}}", values.join(","));
+                
+                Ok((PropertyType::Array, raw_value, values))
             }
             _ => Err(Error::ParseError {
                 message: "Expected array value".to_string(),

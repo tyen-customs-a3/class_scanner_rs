@@ -32,56 +32,173 @@ impl Preprocessor {
         }
         self.processed_files.push(file_path.clone());
 
+        // Read the file as raw bytes first
         let content = fs::read_to_string(&file_path)?;
         self.process_content(&content, &file_path)
     }
 
     fn process_content(&mut self, content: &str, source_file: &Path) -> Result<String, Error> {
         let mut result = String::new();
-        let mut lines = content.lines().peekable();
+        let mut current_line = String::new();
+        let mut in_string = false;
+        let mut in_comment = false;
+        let mut in_multiline_comment = false;
+        let mut escape_next = false;
 
-        while let Some(line) = lines.next() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with("//") {
-                // Preserve empty lines and comments
-                result.push_str(line);
-                result.push('\n');
-            } else if trimmed.starts_with("#") {
-                if let Some(captures) = INCLUDE_PATTERN.captures(line) {
-                    let include_path = captures.get(1).unwrap().as_str();
-                    let resolved_path = self.path_resolver.resolve_include(include_path, source_file)?;
-                    let included_content = self.process_file(resolved_path)?;
-                    result.push_str(&included_content);
-                    if !included_content.ends_with('\n') {
-                        result.push('\n');
+        let mut chars = content.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' if in_string => {
+                    escape_next = !escape_next;
+                    current_line.push(c);
+                }
+                '"' => {
+                    if !escape_next {
+                        in_string = !in_string;
                     }
-                } else if let Some(captures) = DEFINE_PATTERN.captures(line) {
-                    let name = captures.get(1).unwrap().as_str();
-                    let value = captures.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-                    self.defines.insert(name.to_string(), value.to_string());
-                    // Skip adding the #define line to the output
+                    current_line.push(c);
+                    escape_next = false;
                 }
-                // Skip other preprocessor directives
-            } else {
-                // Process any defines in the line
-                let processed_line = self.process_defines(line);
-                let processed_trimmed = processed_line.trim();
-                if !processed_trimmed.is_empty() && !processed_trimmed.starts_with('#') {
-                    result.push_str(&processed_line);
-                    result.push('\n');
+                '/' if !in_string && !escape_next => {
+                    if let Some(&next) = chars.peek() {
+                        match next {
+                            '/' if !in_multiline_comment => {
+                                in_comment = true;
+                                current_line.push(c);
+                                current_line.push(next);
+                                chars.next();
+                                continue;
+                            }
+                            '*' if !in_comment => {
+                                in_multiline_comment = true;
+                                current_line.push(c);
+                                current_line.push(next);
+                                chars.next();
+                                continue;
+                            }
+                            _ => current_line.push(c)
+                        }
+                    }
                 }
+                '*' if in_multiline_comment && !in_string => {
+                    if let Some(&'/') = chars.peek() {
+                        in_multiline_comment = false;
+                        current_line.push(c);
+                        current_line.push('/');
+                        chars.next();
+                        continue;
+                    }
+                    current_line.push(c);
+                }
+                '\n' => {
+                    if in_comment {
+                        in_comment = false;
+                    }
+                    escape_next = false;
+                    
+                    if !in_multiline_comment {
+                        if !current_line.trim().is_empty() {
+                            if let Some(processed) = self.process_line(&current_line) {
+                                result.push_str(&processed);
+                                result.push('\n');
+                            }
+                        } else {
+                            result.push('\n');
+                        }
+                        current_line.clear();
+                    } else {
+                        current_line.push('\n');
+                    }
+                }
+                _ => {
+                    escape_next = false;
+                    current_line.push(c);
+                }
+            }
+        }
+
+        if !current_line.is_empty() {
+            if let Some(processed) = self.process_line(&current_line) {
+                result.push_str(&processed);
             }
         }
 
         Ok(result)
     }
 
-    fn process_defines(&self, line: &str) -> String {
-        let mut result = line.to_string();
-        for (name, value) in &self.defines {
-            result = result.replace(name, value);
+    fn process_line(&mut self, line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        
+        if trimmed.is_empty() {
+            return None;
         }
-        result.trim_end().to_string()
+
+        // Always preserve array properties without preprocessing them
+        if trimmed.contains("[]") {
+            return Some(line.to_string());
+        }
+
+        if trimmed.starts_with('#') {
+            if let Some(captures) = INCLUDE_PATTERN.captures(line) {
+                let include_path = captures.get(1).unwrap().as_str();
+                if let Ok(resolved_path) = self.path_resolver.resolve_include(include_path, Path::new("")) {
+                    if let Ok(included_content) = self.process_file(resolved_path) {
+                        return Some(included_content);
+                    }
+                }
+                return None;
+            } else if let Some(captures) = DEFINE_PATTERN.captures(line) {
+                let name = captures.get(1).unwrap().as_str();
+                let value = captures.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+                self.defines.insert(name.to_string(), value.to_string());
+                return None;
+            }
+            return None;
+        }
+
+        // Process defines only when not in a string
+        let mut result = String::with_capacity(line.len());
+        let mut in_string = false;
+        let mut escape_next = false;
+        
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            match chars[i] {
+                '\\' if in_string => {
+                    escape_next = !escape_next;
+                    result.push(chars[i]);
+                }
+                '"' => {
+                    if !escape_next {
+                        in_string = !in_string;
+                    }
+                    result.push(chars[i]);
+                    escape_next = false;
+                }
+                c if !in_string => {
+                    let mut found_define = false;
+                    for (name, value) in &self.defines {
+                        if chars[i..].starts_with(&name.chars().collect::<Vec<_>>()) {
+                            result.push_str(value);
+                            i += name.len() - 1;
+                            found_define = true;
+                            break;
+                        }
+                    }
+                    if !found_define {
+                        result.push(c);
+                    }
+                }
+                _ => {
+                    escape_next = false;
+                    result.push(chars[i]);
+                }
+            }
+            i += 1;
+        }
+
+        Some(result)
     }
 }
 

@@ -16,7 +16,7 @@ fn get_test_data_dir() -> PathBuf {
 }
 
 fn init_test_logging() {
-    init_logging(Some("debug")).ok(); // It's ok if this fails on subsequent calls
+    init_logging(Some("info")).ok(); // It's ok if this fails on subsequent calls
 }
 
 #[test]
@@ -321,5 +321,78 @@ fn test_parse_hidden_vest() -> Result<(), Error> {
     validate_protection_info(plate_iteminfo, 24, 0.2);
 
     Ok(())
+}
+
+#[test]
+fn test_parse_3den_config() -> Result<(), Error> {
+    // init_test_logging();
+    let data_dir = get_test_data_dir();
+    let config_path = data_dir.join("a3_Addons_3den_a3_3den_config.cpp");
+
+    // Step 1: Preprocess the file
+    let mut preprocessor = Preprocessor::new(&data_dir);
+    println!("Starting preprocessing of 3DEN config...");
+    let content = match preprocessor.process_file(&config_path) {
+        Ok(content) => {
+            println!("Successfully preprocessed file. Content length: {}", content.len());
+            // Print first 200 chars of content for debugging
+            println!("File start:\n{}", &content[..200.min(content.len())]);
+            content
+        },
+        Err(e) => {
+            println!("Preprocessing failed: {:?}", e);
+            return Err(e);
+        }
+    };
+
+    // Step 2: Tokenize with extra error context
+    println!("Starting tokenization...");
+    let mut tokenizer = Tokenizer::with_file_path(&content, &config_path);
+    let tokens = match tokenizer.tokenize() {
+        Ok(tokens) => {
+            println!("Successfully tokenized file. Token count: {}", tokens.len());
+            tokens
+        },
+        Err(e) => {
+            println!("Tokenization failed: {:?}", e);
+            return Err(e);
+        }
+    };
+
+    // Step 3: Parse with detailed error checking
+    println!("Starting parsing...");
+    let mut parser = Parser::new(tokens.clone());
+    match parser.parse() {
+        Ok(ast) => {
+            println!("Successfully parsed file. Root class count: {}", ast.nested_classes.len());
+            // ...rest of the function...
+            Ok(())
+        },
+        Err(e) => {
+            println!("Parsing failed: {}", e);
+            // Print context around the error
+            if let Error::ParseError { location, .. } = &e {
+                if location.line > 0 {
+                    println!("\nContext around error:");
+                    let error_line = location.line;
+                    let error_col = location.column;
+                    
+                    // Find tokens around the error location
+                    let error_tokens: Vec<_> = tokens.iter()
+                        .filter(|t| t.line >= error_line.saturating_sub(2) && t.line <= error_line + 2)
+                        .collect();
+                    
+                    println!("Tokens near line {}:", error_line);
+                    for token in error_tokens {
+                        println!("  {:?} at line {}, column {}{}", 
+                            token.token_type, token.line, token.column,
+                            if token.line == error_line && token.column == error_col { " <-- ERROR HERE" } else { "" }
+                        );
+                    }
+                }
+            }
+            Err(e)
+        }
+    }
 }
 
